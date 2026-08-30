@@ -45,17 +45,6 @@ O objetivo é facilitar o planejamento das refeições, promover uma alimentaç�
 
 ---
 
-## 📱 Rascunho das Telas
-
-As principais telas previstas para o aplicativo são:
-
-* **Tela Inicial:** apresenta uma visão geral dos alimentos cadastrados e produtos próximos do vencimento, além de acesso às principais funcionalidades.
-* **Minha Despensa:** permite visualizar os alimentos cadastrados, suas quantidades e datas de validade.
-* **Receitas:** apresenta sugestões de receitas de acordo com os ingredientes disponíveis.
-* **Detalhes da Receita:** apresenta os ingredientes e suas quantidades, permitindo ajustar a receita para diferentes quantidades de pessoas e identificar ingredientes faltantes.
-
----
-
 ## 🛠️ Tecnologias
 
 * **Flutter:** framework utilizado para o desenvolvimento do aplicativo mobile.

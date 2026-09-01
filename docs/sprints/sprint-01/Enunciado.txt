@@ -1,0 +1,16 @@
+Nesta Sprint, deverá ser entregue um documento PDF especificando:
+
+
+1) Nome do Projeto
+
+2) Componentes do Time
+
+Nome dos componentes e função dentro do time
+3) Link para o Github
+
+4) Proposta de Desenvolvimento
+
+Objetivo do App - o que é e para que serve
+Publico alvo do App - quem irá se beneficiar com a utilização do App
+Principais funcionalidades
+Rascunho das telas do App

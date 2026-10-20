@@ -1,1467 +1,1670 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
-void main() {
-  runApp(const ChefimApp());
-}
+void main() => runApp(const ChefimApp());
 
-const Color verdeChefim = Color(0xFF32B43A);
-const Color cinzaChefim = Color(0xFF9299AE);
+final nightMode = ValueNotifier<bool>(false);
 
-// Dados temporários do usuário. Quando o Firebase for conectado, esses valores
-// devem vir do usuário autenticado.
-final ValueNotifier<String?> nomeUsuarioChefim = ValueNotifier<String?>(null);
-final ValueNotifier<String?> emailUsuarioChefim = ValueNotifier<String?>(null);
+Color get green =>
+    nightMode.value ? const Color(0xFF52CE64) : const Color(0xFF32B43A);
+Color get darkGreen =>
+    nightMode.value ? const Color(0xFF7BE18A) : const Color(0xFF248A2A);
+Color get softGreen =>
+    nightMode.value ? const Color(0xFF203629) : const Color(0xFFE9F8EB);
+Color get ink =>
+    nightMode.value ? const Color(0xFFF2F7F2) : const Color(0xFF172019);
+Color get muted =>
+    nightMode.value ? const Color(0xFFB2C0B5) : const Color(0xFF9299AE);
+Color get canvas =>
+    nightMode.value ? const Color(0xFF101713) : const Color(0xFFFAFCF9);
+Color get surface =>
+    nightMode.value ? const Color(0xFF1B271E) : Colors.white;
+Color get line =>
+    nightMode.value ? const Color(0xFF314536) : const Color(0xFFEDF0ED);
+Color get red =>
+    nightMode.value ? const Color(0xFFFF8580) : const Color(0xFFEB5757);
+Color get rose =>
+    nightMode.value ? const Color(0xFF3C282B) : const Color(0xFFFFF0EF);
+Color get gold =>
+    nightMode.value ? const Color(0xFF3D3524) : const Color(0xFFFFF7DD);
+Color get lavender =>
+    nightMode.value ? const Color(0xFF322D45) : const Color(0xFFF1EFFF);
+Color get milkTone =>
+    nightMode.value ? const Color(0xFF283746) : const Color(0xFFEAF2FA);
+Color get attentionStart =>
+    nightMode.value ? const Color(0xFF223A29) : const Color(0xFFEFFBEF);
+Color get attentionEnd =>
+    nightMode.value ? const Color(0xFF1B2C21) : const Color(0xFFF9FFF8);
 
-String primeiroNome(String nomeCompleto) {
-  final nome = nomeCompleto.trim();
-  if (nome.isEmpty) return '';
-  return nome.split(RegExp(r'\s+')).first;
-}
+BoxShadow get shadow => BoxShadow(
+      color: nightMode.value
+          ? const Color(0x55000000)
+          : const Color(0x12203E25),
+      blurRadius: 28,
+      offset: const Offset(0, 8),
+    );
 
-Future<void> abrirScannerProduto(BuildContext context) async {
-  final codigo = await Navigator.push<String>(
-    context,
-    MaterialPageRoute(builder: (_) => const ScannerProdutoPage()),
-  );
-
-  if (codigo == null || !context.mounted) return;
-
-  showDialog(
-    context: context,
-    builder: (_) => AlertDialog(
-      title: const Text('Produto escaneado'),
-      content: Text(
-        'Código encontrado:\n\n$codigo\n\n'
-        'Na próxima etapa podemos consultar uma base de produtos e '
-        'preencher automaticamente o nome, marca e categoria.',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text(
-            'Fechar',
-            style: TextStyle(color: verdeChefim),
-          ),
-        ),
-      ],
-    ),
-  );
-}
+TextStyle type(double size, {bool bold = false, Color? color}) => TextStyle(
+      fontSize: size,
+      color: color ?? ink,
+      fontWeight: bold ? FontWeight.w800 : FontWeight.w400,
+    );
 
 class ChefimApp extends StatelessWidget {
   const ChefimApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Chefim',
-      theme: ThemeData(
-        useMaterial3: true,
-        scaffoldBackgroundColor: Colors.white,
-        colorScheme: ColorScheme.fromSeed(seedColor: verdeChefim),
-      ),
-      home: const MainPage(),
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+        valueListenable: nightMode,
+        builder: (context, isNight, _) => MaterialApp(
+          title: 'Chefim',
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(
+            useMaterial3: true,
+            scaffoldBackgroundColor: canvas,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: green,
+              brightness: isNight ? Brightness.dark : Brightness.light,
+            ),
+            fontFamily: 'Roboto',
+          ),
+          home: const ChefimShell(),
+        ),
+      );
+}
+
+class Product {
+  Product(this.name, this.expiryDate);
+
+  final String name;
+  final DateTime expiryDate;
+
+  int get days => DateUtils.dateOnly(expiryDate)
+      .difference(DateUtils.dateOnly(DateTime.now()))
+      .inDays;
+
+  String get date =>
+      '${expiryDate.day.toString().padLeft(2, '0')}/'
+      '${expiryDate.month.toString().padLeft(2, '0')}/'
+      '${expiryDate.year}';
+}
+
+class ShoppingItem {
+  ShoppingItem(this.name, {this.checked = false});
+
+  final String name;
+  bool checked;
+}
+
+class ChefimShell extends StatefulWidget {
+  const ChefimShell({super.key});
+
+  @override
+  State<ChefimShell> createState() => _ChefimShellState();
+}
+
+class _ChefimShellState extends State<ChefimShell> {
+  int tab = 0;
+  String? name;
+  String? email;
+
+  // Conta temporária em memória, até a integração com autenticação e banco.
+  String? registeredName;
+  String? registeredEmail;
+  String? registeredPassword;
+
+  // Os produtos adicionados pelo usuário começam vazios.
+  final products = <Product>[];
+
+  final shopping = <ShoppingItem>[
+    ShoppingItem('Banana'),
+    ShoppingItem('Ovos', checked: true),
+    ShoppingItem('Café'),
+  ];
+
+  void select(int next) => setState(() => tab = next);
+
+  Future<void> open(Widget page) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => page),
     );
-  }
-}
-
-class MainPage extends StatefulWidget {
-  final int initialIndex;
-
-  const MainPage({super.key, this.initialIndex = 0});
-
-  @override
-  State<MainPage> createState() => _MainPageState();
-}
-
-class _MainPageState extends State<MainPage> {
-  late int index;
-
-  @override
-  void initState() {
-    super.initState();
-    index = widget.initialIndex;
+    if (mounted) setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
-    final pages = [
-      InicioPage(
-        onAbrirDespensa: () {
-          setState(() {
-            index = 1;
-          });
-        },
-      ),
-      const DespensaPage(),
-      const ReceitasPage(),
-      const PerfilPage(),
-    ];
+    final pages = [home(), pantry(), recipes(), profile()];
 
     return Scaffold(
-      body: pages[index],
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: index,
-        type: BottomNavigationBarType.fixed,
-        backgroundColor: Colors.white,
-        selectedItemColor: verdeChefim,
-        unselectedItemColor: const Color(0xFF9AA2B2),
-        selectedFontSize: 11,
-        unselectedFontSize: 11,
-        onTap: (novoIndex) {
-          setState(() {
-            index = novoIndex;
-          });
-        },
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home),
-            label: 'Início',
+      body: SafeArea(child: pages[tab]),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Container(
+          height: 72,
+          decoration: BoxDecoration(
+            color: surface,
+            border: Border(top: BorderSide(color: line)),
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.inventory_2_outlined),
-            activeIcon: Icon(Icons.inventory_2),
-            label: 'Despensa',
+          child: Row(
+            children: [
+              nav(0, 'Início', Icons.home_outlined),
+              nav(1, 'Despensa', Icons.inventory_2_outlined),
+              nav(2, 'Receitas', Icons.soup_kitchen_outlined),
+              nav(3, 'Perfil', Icons.person_outline),
+            ],
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.access_time),
-            activeIcon: Icon(Icons.access_time_filled),
-            label: 'Receitas',
+        ),
+      ),
+    );
+  }
+
+  Widget nav(int index, String title, IconData icon) => Expanded(
+        child: InkWell(
+          onTap: () => select(index),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                color: index == tab ? green : muted,
+                size: 25,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                title,
+                style: type(
+                  10,
+                  bold: index == tab,
+                  color: index == tab ? green : muted,
+                ),
+              ),
+            ],
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline),
-            activeIcon: Icon(Icons.person),
-            label: 'Perfil',
+        ),
+      );
+
+  Widget section(String title, String detail) => Padding(
+        padding: const EdgeInsets.only(top: 22, bottom: 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(title, style: type(15, bold: true)),
+            ),
+            Text(detail, style: type(11, color: muted)),
+          ],
+        ),
+      );
+
+  Widget home() {
+    final expiring =
+        products.where((product) => product.days <= 3).length;
+
+    return scroll([
+      Row(
+        children: [
+          Expanded(
+            child: RichText(
+              text: TextSpan(
+                children: [
+                  TextSpan(
+                    text: 'Chefim',
+                    style: type(23, bold: true, color: green),
+                  ),
+                  TextSpan(
+                    text: '.',
+                    style: type(23, bold: true),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          IconButton(
+            onPressed: () => open(settingsPage(true)),
+            icon: Icon(Icons.notifications_none, color: ink),
           ),
         ],
       ),
-    );
-  }
-}
-
-class InicioPage extends StatelessWidget {
-  final VoidCallback onAbrirDespensa;
-
-  const InicioPage({super.key, required this.onAbrirDespensa});
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 22),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 22),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Chefim',
-                  style: TextStyle(
-                    color: verdeChefim,
-                    fontSize: 28,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'Notificações',
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Você não possui novas notificações.'),
-                      ),
-                    );
-                  },
-                  icon: const Icon(
-                    Icons.notifications_none_rounded,
-                    color: verdeChefim,
-                    size: 28,
-                  ),
-                ),
+      const SizedBox(height: 17),
+      Text(
+        'BEM-VINDO AO CHEFIM',
+        style: type(10, bold: true, color: darkGreen),
+      ),
+      const SizedBox(height: 5),
+      Text(
+        name == null
+            ? 'Olá! 👋'
+            : 'Olá, ${name!.trim().split(RegExp(r'\s+')).first}! 👋',
+        style: type(28, bold: true),
+      ),
+      const SizedBox(height: 5),
+      Text(
+        'Que bom ter você por aqui!',
+        style: type(14, color: muted),
+      ),
+      const SizedBox(height: 17),
+      panel(
+        Container(
+          constraints: const BoxConstraints(minHeight: 176),
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                attentionStart,
+                attentionEnd,
               ],
             ),
-            const SizedBox(height: 22),
-            ValueListenableBuilder<String?>(
-              valueListenable: nomeUsuarioChefim,
-              builder: (context, nome, _) {
-                final nomeExibido = nome == null ? '' : primeiroNome(nome);
-                return Text(
-                  nomeExibido.isEmpty ? 'Olá! 👋' : 'Olá, $nomeExibido! 👋',
-                  style: const TextStyle(
-                    fontSize: 27,
-                    fontWeight: FontWeight.w800,
-                  ),
-                );
-              },
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Que bom ter você por aqui!',
-              style: TextStyle(fontSize: 16),
-            ),
-            const SizedBox(height: 24),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(18),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x14000000),
-                    blurRadius: 18,
-                    offset: Offset(0, 5),
-                  ),
-                ],
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Atenção',
-                          style: TextStyle(
-                            fontSize: 19,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        const Text(
-                          'Você tem 3 produtos próximos\ndo vencimento.',
-                          style: TextStyle(fontSize: 14, height: 1.4),
-                        ),
-                        const SizedBox(height: 13),
-                        ElevatedButton(
-                          onPressed: onAbrirDespensa,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: verdeChefim,
-                            foregroundColor: Colors.white,
-                            elevation: 0,
-                            shape: const StadiumBorder(),
-                          ),
-                          child: const Text('Ver produtos'),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      Container(
-                        width: 76,
-                        height: 76,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF3F4F1),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: const Icon(
-                          Icons.calendar_month_rounded,
-                          color: verdeChefim,
-                          size: 48,
-                        ),
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (expiring > 0) ...[
+                      Text(
+                        'ATENÇÃO',
+                        style: type(10, bold: true, color: darkGreen),
                       ),
-                      Positioned(
-                        right: -7,
-                        bottom: -7,
-                        child: Container(
-                          width: 37,
-                          height: 37,
-                          decoration: const BoxDecoration(
-                            color: Colors.red,
-                            shape: BoxShape.circle,
-                          ),
-                          alignment: Alignment.center,
-                          child: const Text(
-                            '!',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 23,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ),
+                      const SizedBox(height: 7),
                     ],
-                  ),
-                ],
+                    Text(
+                      expiring > 0
+                          ? 'Consuma antes, desperdice menos.'
+                          : 'Tudo em dia!',
+                      style: type(17, bold: true),
+                    ),
+                    const SizedBox(height: 7),
+                    Text(
+                      expiring > 0
+                          ? 'Você tem $expiring produto'
+                              '${expiring == 1 ? '' : 's'} próximo'
+                              '${expiring == 1 ? '' : 's'} do vencimento.'
+                          : 'Nenhum produto perto do vencimento.',
+                      style: type(12, color: muted),
+                    ),
+                    const SizedBox(height: 12),
+                    smallButton('Ver produtos', () => select(1)),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 25),
-            const Text(
-              'Resumo da sua despensa',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 13),
-            GridView.count(
-              crossAxisCount: 2,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              childAspectRatio: 1.34,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              children: const [
-                ResumoDespensaCard(
-                  valor: '12',
-                  descricao: 'Produtos\ncadastrados',
-                  icone: Icons.inventory_2_outlined,
-                  corIcone: verdeChefim,
-                  fundoIcone: Color(0xFFEAF8E8),
-                ),
-                ResumoDespensaCard(
-                  valor: '3',
-                  descricao: 'Próximos do\nvencimento',
-                  icone: Icons.alarm_rounded,
-                  corIcone: Colors.red,
-                  fundoIcone: Color(0xFFFFECE8),
-                  corValor: Colors.red,
-                ),
-                ResumoDespensaCard(
-                  valor: '5',
-                  descricao: 'Receitas possíveis\ncom seus itens',
-                  icone: Icons.soup_kitchen_outlined,
-                  corIcone: Color(0xFF2474A8),
-                  fundoIcone: Color(0xFFEAF5FC),
-                ),
-                ResumoDespensaCard(
-                  valor: '1.250',
-                  descricao: 'Total de calorias\ndisponíveis',
-                  icone: Icons.local_fire_department_outlined,
-                  corIcone: Color(0xFFF29B18),
-                  fundoIcone: Color(0xFFFFF5D8),
-                  corValor: Colors.red,
-                ),
-              ],
-            ),
-            const SizedBox(height: 27),
-            Material(
-              color: verdeChefim,
-              borderRadius: BorderRadius.circular(32),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(32),
-                onTap: () => abrirScannerProduto(context),
-                child: Container(
-                  width: double.infinity,
-                  height: 64,
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  child: Row(
-                    children: [
-                      const Spacer(),
-                      const Text(
-                        'Escanear produto',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const Spacer(),
-                      Container(
-                        width: 47,
-                        height: 47,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF159A24),
+              const SizedBox(width: 7),
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Icon(
+                    Icons.calendar_month_outlined,
+                    color: green,
+                    size: 51,
+                  ),
+                  if (expiring > 0)
+                    Positioned(
+                      right: -5,
+                      top: -8,
+                      child: Container(
+                        width: 24,
+                        height: 24,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: red,
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(
-                          Icons.qr_code_scanner_rounded,
-                          color: Colors.white,
-                          size: 28,
+                        child: Text(
+                          '!',
+                          style: type(
+                            16,
+                            bold: true,
+                            color: Colors.white,
+                          ),
                         ),
                       ),
-                    ],
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        custom: true,
+      ),
+      section('Resumo da sua despensa', 'Hoje'),
+      Row(
+        children: [
+          Expanded(
+            child: stat(
+              '${products.length + 1}',
+              'Produtos cadastrados',
+              Icons.inventory_2_outlined,
+              softGreen,
+              darkGreen,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: stat(
+              '$expiring',
+              'Próximos do vencimento',
+              Icons.access_time,
+              rose,
+              red,
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 10),
+      Row(
+        children: [
+          Expanded(
+            child: stat(
+              '0',
+              'Receitas possíveis com seus itens',
+              Icons.soup_kitchen_outlined,
+              gold,
+              const Color(0xFFD29219),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: stat(
+              '650 kcal',
+              'Total de calorias disponíveis',
+              Icons.local_fire_department_outlined,
+              lavender,
+              const Color(0xFF7769CA),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 14),
+      primary(
+        'Escanear produto',
+        () => open(const ScannerPage()),
+        icon: Icons.qr_code_scanner_outlined,
+        trailing: Icons.chevron_right,
+      ),
+    ]);
+  }
+
+  Widget stat(
+    String value,
+    String label,
+    IconData icon,
+    Color bg,
+    Color fg,
+  ) =>
+      panel(
+        SizedBox(
+          height: 125,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              badge(icon, bg, fg),
+              const SizedBox(height: 8),
+              Text(value, style: type(22, bold: true)),
+              Text(
+                label,
+                maxLines: 2,
+                style: type(11, color: muted),
+              ),
+            ],
+          ),
+        ),
+      );
+
+  Widget pantry() {
+    final expiring =
+        products.where((product) => product.days <= 3).length;
+    final milkExpiry =
+        DateTime.now().add(const Duration(days: 5));
+
+    return scroll([
+      topbar('Minha despensa'),
+      subtitle('Veja seus produtos e o que está perto de vencer.'),
+      Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: softGreen,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: line),
+        ),
+        child: Row(
+          children: [
+            badge(
+              Icons.notifications_none,
+              Colors.white,
+              darkGreen,
+            ),
+            const SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  expiring == 0
+                      ? 'Nenhum produto vence'
+                      : '$expiring produto'
+                          '${expiring == 1 ? '' : 's'} vence'
+                          '${expiring == 1 ? '' : 'm'}',
+                  style: type(12, bold: true),
+                ),
+                Text(
+                  'nos próximos 3 dias',
+                  style: type(
+                    12,
+                    bold: expiring > 0,
+                    color: expiring > 0 ? red : darkGreen,
                   ),
                 ),
-              ),
+              ],
             ),
-            const SizedBox(height: 28),
           ],
         ),
       ),
-    );
-  }
-}
-
-class ResumoDespensaCard extends StatelessWidget {
-  final String valor;
-  final String descricao;
-  final IconData icone;
-  final Color corIcone;
-  final Color fundoIcone;
-  final Color corValor;
-
-  const ResumoDespensaCard({
-    super.key,
-    required this.valor,
-    required this.descricao,
-    required this.icone,
-    required this.corIcone,
-    required this.fundoIcone,
-    this.corValor = Colors.black,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x10000000),
-            blurRadius: 14,
-            offset: Offset(0, 4),
-          ),
-        ],
+      const SizedBox(height: 12),
+      primary(
+        'Adicionar produto',
+        addProduct,
+        icon: Icons.add,
       ),
-      child: Stack(
-        children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                valor,
-                style: TextStyle(
-                  color: corValor,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 5),
-              Text(
-                descricao,
-                style: const TextStyle(fontSize: 13, height: 1.3),
-              ),
-            ],
+      section(
+        'Produtos da despensa',
+        '${products.length + 1} itens',
+      ),
+      ...products.map(
+        (product) => Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: productCard(product),
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: productCard(
+          Product(
+            'Leite',
+            milkExpiry,
           ),
-          Positioned(
-            right: 0,
-            top: 0,
-            child: Container(
-              width: 35,
-              height: 35,
-              decoration: BoxDecoration(
-                color: fundoIcone,
-                shape: BoxShape.circle,
+          example: true,
+        ),
+      ),
+    ]);
+  }
+
+  Widget productCard(Product product, {bool example = false}) =>
+      panel(
+        Row(
+          children: [
+            badge(
+              Icons.inventory_2_outlined,
+              example ? milkTone : softGreen,
+              ink,
+              size: 52,
+            ),
+            const SizedBox(width: 13),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    product.name,
+                    style: type(13, bold: true),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    product.days < 0
+                        ? 'Venceu há ${-product.days} dias'
+                        : product.days == 0
+                            ? 'Vence hoje'
+                            : product.days == 1
+                                ? 'Vence amanhã'
+                                : 'Vence em ${product.days} dias',
+                    style: type(
+                      11,
+                      color: product.days <= 3 ? red : darkGreen,
+                    ),
+                  ),
+                  Text(
+                    example
+                        ? '${product.date} • Exemplo: 1 L integral'
+                        : product.date,
+                    style: type(10, color: muted),
+                  ),
+                ],
               ),
-              child: Icon(icone, color: corIcone, size: 21),
+            ),
+            CircleAvatar(
+              radius: 4,
+              backgroundColor:
+                  product.days <= 3 ? red : green,
+            ),
+          ],
+        ),
+      );
+
+  Future<void> addProduct() async {
+    final item = TextEditingController();
+    DateTime? expiryDate;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(27),
+        ),
+      ),
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, refreshSheet) => Padding(
+          padding: EdgeInsets.fromLTRB(
+            22,
+            22,
+            22,
+            MediaQuery.viewInsetsOf(sheetContext).bottom + 32,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Adicionar produto',
+                  style: type(20, bold: true),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  'Inclua um item e acompanhe sua validade.',
+                  style: type(12, color: muted),
+                ),
+                const SizedBox(height: 20),
+                field(
+                  'Nome do produto',
+                  'Ex.: Café',
+                  item,
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  'Data de vencimento',
+                  style: type(12, bold: true),
+                ),
+                const SizedBox(height: 7),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      final today = DateUtils.dateOnly(DateTime.now());
+                      final picked = await showDatePicker(
+                        context: sheetContext,
+                        initialDate: expiryDate ?? today,
+                        firstDate: today,
+                        lastDate: DateTime(today.year + 20, 12, 31),
+                      );
+                      if (picked != null && sheetContext.mounted) {
+                        refreshSheet(() => expiryDate = picked);
+                      }
+                    },
+                    icon: const Icon(Icons.calendar_today_outlined),
+                    label: Text(
+                      expiryDate == null
+                          ? 'Selecionar data'
+                          : '${expiryDate!.day.toString().padLeft(2, '0')}/'
+                            '${expiryDate!.month.toString().padLeft(2, '0')}/'
+                            '${expiryDate!.year}',
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                primary('Adicionar à despensa', () {
+                  if (item.text.trim().isEmpty || expiryDate == null) {
+                    ScaffoldMessenger.of(sheetContext).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Informe o produto e a data de vencimento.',
+                        ),
+                      ),
+                    );
+                    return;
+                  }
+
+                  setState(() {
+                    products.insert(
+                      0,
+                      Product(
+                        item.text.trim(),
+                        expiryDate!,
+                      ),
+                    );
+                  });
+
+                  Navigator.pop(sheetContext);
+                }),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    item.dispose();
+  }
+
+  Widget recipes() {
+    return scroll([
+      topbar(
+        'Receitas',
+        action: IconButton(
+          tooltip: 'Pesquisar receitas',
+          onPressed: () => open(const ScaledRecipesPage()),
+          icon: Icon(
+            Icons.search,
+            color: darkGreen,
+          ),
+        ),
+      ),
+      subtitle('Com o que você tem na despensa'),
+      Row(
+        children: [
+          Expanded(
+            child: Text(
+              'Ideias para hoje',
+              style: type(14, bold: true),
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10,
+              vertical: 7,
+            ),
+            decoration: BoxDecoration(
+              color: softGreen,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              '0 disponíveis',
+              style: type(
+                10,
+                bold: true,
+                color: darkGreen,
+              ),
             ),
           ),
         ],
       ),
-    );
-  }
-}
-
-class CriarContaPage extends StatefulWidget {
-  const CriarContaPage({super.key});
-
-  @override
-  State<CriarContaPage> createState() => _CriarContaPageState();
-}
-
-class _CriarContaPageState extends State<CriarContaPage> {
-  final nomeController = TextEditingController();
-  final emailController = TextEditingController();
-  final senhaController = TextEditingController();
-  final confirmarController = TextEditingController();
-
-  @override
-  void dispose() {
-    nomeController.dispose();
-    emailController.dispose();
-    senhaController.dispose();
-    confirmarController.dispose();
-    super.dispose();
+      const SizedBox(height: 32),
+      Center(
+        child: Column(
+          children: [
+            badge(
+              Icons.soup_kitchen_outlined,
+              softGreen,
+              darkGreen,
+              size: 62,
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'Nenhuma receita disponível',
+              style: type(15, bold: true),
+            ),
+          ],
+        ),
+      ),
+    ]);
   }
 
-  void criarConta() {
-    if (nomeController.text.trim().isEmpty ||
-        emailController.text.trim().isEmpty ||
-        senhaController.text.isEmpty ||
-        confirmarController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Preencha todos os campos.')),
-      );
-      return;
-    }
-
-    if (senhaController.text != confirmarController.text) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('As senhas não são iguais.')),
-      );
-      return;
-    }
-
-    nomeUsuarioChefim.value = nomeController.text.trim();
-    emailUsuarioChefim.value = emailController.text.trim();
-
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (_) => const MainPage()),
-      (route) => false,
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Column(
+  Widget profile() => scroll([
+        topbar('Perfil'),
+        const SizedBox(height: 12),
+        panel(
+          Row(
             children: [
-              const SizedBox(height: 15),
-              Stack(
-                alignment: Alignment.center,
-                children: [
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: IconButton(
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(
-                        Icons.arrow_back_ios_new,
-                        color: verdeChefim,
-                        size: 20,
+              CircleAvatar(
+                radius: 25,
+                backgroundColor: green,
+                child: name == null
+                    ? const Icon(
+                        Icons.person_outline,
+                        color: Colors.white,
+                      )
+                    : Text(
+                        name![0].toUpperCase(),
+                        style: type(
+                          21,
+                          bold: true,
+                          color: Colors.white,
+                        ),
                       ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name ?? 'Visitante',
+                      style: type(15, bold: true),
                     ),
-                  ),
-                  const Text(
-                    'Criar conta',
-                    style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.bold,
+                    const SizedBox(height: 4),
+                    Text(
+                      email ??
+                          'Crie sua conta para salvar seus dados',
+                      style: type(11, color: muted),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'Comece a usar o Chefim',
-                style: TextStyle(fontSize: 23, fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Cadastre-se para salvar sua despensa\n'
-                'e receber alertas de validade.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: cinzaChefim,
-                  fontSize: 14,
-                  height: 1.5,
-                ),
-              ),
-              const SizedBox(height: 28),
-              CampoChefim(
-                titulo: 'Nome completo',
-                dica: 'Digite seu nome',
-                controller: nomeController,
-              ),
-              const SizedBox(height: 18),
-              CampoChefim(
-                titulo: 'E-mail',
-                dica: 'Digite seu e-mail',
-                controller: emailController,
-                tipo: TextInputType.emailAddress,
-              ),
-              const SizedBox(height: 18),
-              CampoChefim(
-                titulo: 'Senha',
-                dica: 'Digite sua senha',
-                controller: senhaController,
-                senha: true,
-              ),
-              const SizedBox(height: 18),
-              CampoChefim(
-                titulo: 'Confirmar senha',
-                dica: 'Repita sua senha',
-                controller: confirmarController,
-                senha: true,
-              ),
-              const SizedBox(height: 28),
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton(
-                  onPressed: criarConta,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: verdeChefim,
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
-                  child: const Text(
-                    'Criar conta',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextButton(
-                onPressed: () {},
-                child: const Text(
-                  'Já possui uma conta? Entrar',
-                  style: TextStyle(color: verdeChefim),
+                  ],
                 ),
               ),
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class CampoChefim extends StatelessWidget {
-  final String titulo;
-  final String dica;
-  final TextEditingController controller;
-  final bool senha;
-  final TextInputType? tipo;
-
-  const CampoChefim({
-    super.key,
-    required this.titulo,
-    required this.dica,
-    required this.controller,
-    this.senha = false,
-    this.tipo,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(titulo),
-        const SizedBox(height: 8),
-        TextField(
-          controller: controller,
-          obscureText: senha,
-          keyboardType: tipo,
-          decoration: InputDecoration(
-            hintText: dica,
-            hintStyle: const TextStyle(color: Color(0xFFC3C9D3)),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
+        const SizedBox(height: 22),
+        Padding(
+          padding: const EdgeInsets.only(
+            left: 4,
+            bottom: 9,
+          ),
+          child: Text(
+            'SUA CONTA',
+            style: type(
+              10,
+              bold: true,
+              color: darkGreen,
             ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(
-                color: verdeChefim,
-                width: 1.5,
+          ),
+        ),
+        panel(
+          Column(
+            children: [
+              menu(
+                name == null ? 'Criar conta' : 'Minha conta',
+                Icons.person_outline,
+                () => open(
+                  name == null ? registerPage() : accountPage(),
+                ),
               ),
+              menu(
+                'Lista de compras',
+                Icons.shopping_cart_outlined,
+                () => open(shoppingPage()),
+              ),
+              menu(
+                'Notificações',
+                Icons.notifications_none,
+                () => open(settingsPage(true)),
+              ),
+              menu(
+                'Configurações',
+                Icons.settings_outlined,
+                () => open(settingsPage(false)),
+              ),
+              menu(
+                'Sobre o Chefim',
+                Icons.info_outline,
+                () => open(aboutPage()),
+                last: true,
+              ),
+            ],
+          ),
+          padding: EdgeInsets.zero,
+        ),
+        const SizedBox(height: 20),
+        if (name != null)
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: OutlinedButton.icon(
+              onPressed: () {
+                setState(() {
+                  name = null;
+                  email = null;
+                  tab = 0;
+                });
+              },
+              style: OutlinedButton.styleFrom(
+                foregroundColor: red,
+                side: BorderSide(color: red),
+              ),
+              icon: const Icon(Icons.logout),
+              label: const Text('Sair da conta'),
             ),
+          ),
+      ]);
+
+  Widget menu(
+    String label,
+    IconData icon,
+    VoidCallback onTap, {
+    bool last = false,
+  }) =>
+      Column(
+        children: [
+          ListTile(
+            onTap: onTap,
+            dense: true,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 14,
+            ),
+            leading: badge(
+              icon,
+              softGreen,
+              darkGreen,
+            ),
+            title: Text(
+              label,
+              style: type(12),
+            ),
+            trailing: Icon(
+              Icons.chevron_right,
+              color: muted,
+            ),
+          ),
+          if (!last) Divider(height: 1, color: line),
+        ],
+      );
+
+  Widget accountPage() => EntryPage(
+        title: 'Minha conta',
+        builder: (pageContext, refresh) => [
+          const SizedBox(height: 18),
+          panel(
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Nome', style: type(12, color: muted)),
+                Text(name ?? '', style: type(15, bold: true)),
+                const SizedBox(height: 16),
+                Text('E-mail', style: type(12, color: muted)),
+                Text(email ?? '', style: type(15, bold: true)),
+              ],
+            ),
+          ),
+        ],
+      );
+
+  Widget registerPage() {
+    final person = TextEditingController();
+    final mail = TextEditingController();
+    final pass = TextEditingController();
+    final confirm = TextEditingController();
+
+    return EntryPage(
+      title: 'Criar conta',
+      builder: (pageContext, refresh) => [
+        const SizedBox(height: 12),
+        Center(
+          child: badge(
+            Icons.person_outline,
+            softGreen,
+            darkGreen,
+            size: 52,
+          ),
+        ),
+        const SizedBox(height: 11),
+        Center(
+          child: Text(
+            'Comece a usar o Chefim',
+            style: type(23, bold: true),
+          ),
+        ),
+        const SizedBox(height: 7),
+        Center(
+          child: Text(
+            'Cadastre-se para salvar sua despensa\n'
+            'e receber alertas de validade.',
+            style: type(12, color: muted),
+            textAlign: TextAlign.center,
+          ),
+        ),
+        const SizedBox(height: 22),
+        field(
+          'Nome completo',
+          'Digite seu nome',
+          person,
+        ),
+        const SizedBox(height: 14),
+        field(
+          'E-mail',
+          'seuemail@exemplo.com',
+          mail,
+          keyboard: TextInputType.emailAddress,
+        ),
+        const SizedBox(height: 14),
+        field(
+          'Senha',
+          'Mínimo de 6 caracteres',
+          pass,
+          hidden: true,
+        ),
+        const SizedBox(height: 14),
+        field(
+          'Confirmar senha',
+          'Repita sua senha',
+          confirm,
+          hidden: true,
+        ),
+        const SizedBox(height: 16),
+        primary('Criar conta', () {
+          if (person.text.trim().isEmpty ||
+              !mail.text.contains('@') ||
+              pass.text.length < 6 ||
+              pass.text != confirm.text) {
+            ScaffoldMessenger.of(pageContext).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Confira nome, e-mail e senha '
+                  '(mínimo de 6 caracteres).',
+                ),
+              ),
+            );
+            return;
+          }
+
+          setState(() {
+            name = person.text.trim();
+            email = mail.text.trim();
+            registeredName = name;
+            registeredEmail = email;
+            registeredPassword = pass.text;
+            tab = 0;
+          });
+
+          Navigator.pop(pageContext);
+        }),
+        Center(
+          child: TextButton(
+            onPressed: () => Navigator.pushReplacement(
+              pageContext,
+              MaterialPageRoute(builder: (_) => loginPage()),
+            ),
+            child: const Text('Já possui uma conta? Entrar'),
           ),
         ),
       ],
     );
   }
-}
 
-class DespensaPage extends StatelessWidget {
-  const DespensaPage({super.key});
+  Widget loginPage() {
+    final mail = TextEditingController();
+    final pass = TextEditingController();
 
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          const Center(
-            child: Text(
-              'Minha despensa',
-              style: TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
-            ),
+    return EntryPage(
+      title: 'Entrar',
+      builder: (pageContext, refresh) => [
+        const SizedBox(height: 12),
+        Center(
+          child: badge(
+            Icons.lock_outline,
+            softGreen,
+            darkGreen,
+            size: 52,
           ),
-          const SizedBox(height: 24),
-          const Text(
-            'Veja seus produtos e o que está perto de vencer.',
-            style: TextStyle(color: cinzaChefim, fontSize: 15),
+        ),
+        const SizedBox(height: 11),
+        Center(
+          child: Text(
+            'Entre na sua conta',
+            style: type(23, bold: true),
           ),
-          const SizedBox(height: 15),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xFFE8F6E8),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Row(
-              children: [
-                Icon(Icons.info_outline, color: verdeChefim),
-                SizedBox(width: 12),
-                Text.rich(
-                  TextSpan(
-                    children: [
-                      TextSpan(
-                        text: '1 produto vence\n',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      TextSpan(
-                        text: 'nos próximos 3 dias',
-                        style: TextStyle(color: Colors.red),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 15),
-          SizedBox(
-            height: 50,
-            child: ElevatedButton.icon(
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'Adicionar produto manualmente será ligado ao banco de dados.',
-                    ),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.add),
-              label: const Text(
-                'Adicionar produto',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: verdeChefim,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
+        ),
+        const SizedBox(height: 22),
+        field(
+          'E-mail',
+          'seuemail@exemplo.com',
+          mail,
+          keyboard: TextInputType.emailAddress,
+        ),
+        const SizedBox(height: 14),
+        field('Senha', 'Digite sua senha', pass, hidden: true),
+        const SizedBox(height: 18),
+        primary('Entrar', () {
+          if (registeredEmail == null ||
+              registeredPassword == null) {
+            ScaffoldMessenger.of(pageContext).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Crie uma conta para entrar nesta versão do app.',
                 ),
               ),
-            ),
-          ),
-          const SizedBox(height: 24),
-          const Text(
-            'Produtos da despensa',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 12),
-          const ProdutoCard(
-            nome: 'Queijo Mussarela',
-            validade: 'Vence em 2 dias',
-            data: '26/08/2026',
-            cor: Color(0xFFFFCA3A),
-            urgente: true,
-          ),
-          const ProdutoCard(
-            nome: 'Leite',
-            validade: 'Vence em 5 dias',
-            data: '29/08/2026',
-            cor: Color(0xFFE1E4EA),
-          ),
-          const ProdutoCard(
-            nome: 'Frango',
-            validade: 'Vence em 7 dias',
-            data: '31/08/2026',
-            cor: Color(0xFFF6A079),
-          ),
-          const ProdutoCard(
-            nome: 'Arroz',
-            validade: 'Vence em 120 dias',
-            data: '15/12/2026',
-            cor: Color(0xFFC8F5DF),
-          ),
-        ],
-      ),
+            );
+            return;
+          }
+
+          if (mail.text.trim().toLowerCase() !=
+                  registeredEmail!.toLowerCase() ||
+              pass.text != registeredPassword) {
+            ScaffoldMessenger.of(pageContext).showSnackBar(
+              const SnackBar(
+                content: Text('E-mail ou senha incorretos.'),
+              ),
+            );
+            return;
+          }
+
+          setState(() {
+            name = registeredName;
+            email = registeredEmail;
+            tab = 0;
+          });
+          Navigator.pop(pageContext);
+        }),
+      ],
     );
   }
-}
 
-class ProdutoCard extends StatelessWidget {
-  final String nome;
-  final String validade;
-  final String data;
-  final Color cor;
-  final bool urgente;
+  Widget shoppingPage() {
+    final draft = TextEditingController();
 
-  const ProdutoCard({
-    super.key,
-    required this.nome,
-    required this.validade,
-    required this.data,
-    required this.cor,
-    this.urgente = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      elevation: 1,
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(15),
-        child: Row(
+    return EntryPage(
+      title: 'Lista de compras',
+      builder: (pageContext, refresh) => [
+        const SizedBox(height: 16),
+        Row(
           children: [
-            Container(
-              width: 50,
-              height: 50,
-              decoration: BoxDecoration(
-                color: cor,
-                borderRadius: BorderRadius.circular(11),
+            Expanded(
+              child: TextField(
+                controller: draft,
+                decoration: input('Digite um produto'),
+                onSubmitted: (_) => addShopping(draft, refresh),
               ),
             ),
-            const SizedBox(width: 15),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  nome,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-                Text(
-                  validade,
-                  style: TextStyle(
-                    color: urgente ? Colors.red : verdeChefim,
-                  ),
-                ),
-                Text(
-                  data,
-                  style: const TextStyle(
-                    color: cinzaChefim,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
+            const SizedBox(width: 9),
+            IconButton.filled(
+              onPressed: () => addShopping(draft, refresh),
+              style: IconButton.styleFrom(
+                backgroundColor: green,
+                foregroundColor: Colors.white,
+              ),
+              icon: const Icon(Icons.add),
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class ReceitasPage extends StatelessWidget {
-  const ReceitasPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    const receitas = [
-      ['🍳', 'Omelete de Queijo', 'Queijo Mussarela, Ovos, Sal', '10 min'],
-      ['🥤', 'Vitamina de Frutas', 'Leite, Banana, Mel', '5 min'],
-      ['🍗', 'Frango Grelhado', 'Frango, Limão, Alho', '25 min'],
-      ['🍚', 'Arroz com Frango', 'Arroz, Frango, Cebola', '35 min'],
-    ];
-
-    return SafeArea(
-      child: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          const Center(
-            child: Text(
-              'Receitas',
-              style: TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Center(
-            child: Text(
-              'Com o que você tem na despensa',
-              style: TextStyle(color: cinzaChefim),
-            ),
-          ),
-          const SizedBox(height: 25),
-          ...receitas.map(
-            (receita) => Card(
-              elevation: 1,
-              margin: const EdgeInsets.only(bottom: 14),
-              child: Padding(
-                padding: const EdgeInsets.all(10),
-                child: ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Container(
-                    width: 52,
-                    height: 52,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEAF7EA),
-                      borderRadius: BorderRadius.circular(11),
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      receita[0],
-                      style: const TextStyle(fontSize: 25),
-                    ),
-                  ),
-                  title: Text(
-                    receita[1],
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  subtitle: Text(
-                    '${receita[2]}\n⏱ ${receita[3]}',
-                    style: const TextStyle(color: cinzaChefim),
-                  ),
-                  trailing: TextButton(
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Abrindo ${receita[1]}')),
-                      );
-                    },
-                    child: const Text(
-                      'Ver',
-                      style: TextStyle(color: verdeChefim),
-                    ),
-                  ),
-                ),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                '${shopping.where((item) => item.checked).length} '
+                'de ${shopping.length} comprados',
+                style: type(10, color: muted),
               ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class PerfilPage extends StatelessWidget {
-  const PerfilPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            const SizedBox(height: 10),
-            const Text(
-              'Perfil',
-              style: TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
+            TextButton(
+              onPressed: () => refresh(() => shopping.clear()),
+              child: const Text('Limpar lista'),
             ),
-            const SizedBox(height: 25),
-            ValueListenableBuilder<String?>(
-              valueListenable: nomeUsuarioChefim,
-              builder: (context, nome, _) {
-                return ValueListenableBuilder<String?>(
-                  valueListenable: emailUsuarioChefim,
-                  builder: (context, email, _) {
-                    final possuiConta = nome != null && nome.trim().isNotEmpty;
-                    final nomePerfil = possuiConta ? nome! : 'Visitante';
-                    final inicial = possuiConta
-                        ? primeiroNome(nome!).substring(0, 1).toUpperCase()
-                        : '?';
-
-                    return Card(
-                      elevation: 1,
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.all(15),
-                        leading: CircleAvatar(
-                          radius: 26,
-                          backgroundColor: verdeChefim,
-                          child: Text(
-                            inicial,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                        title: Text(
-                          nomePerfil,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        subtitle: Text(
-                          possuiConta
-                              ? (email ?? '')
-                              : 'Crie sua conta para salvar seus dados',
-                          style: const TextStyle(color: cinzaChefim),
-                        ),
-                      ),
-                    );
-                  },
-                );
-              },
-            ),
-            const SizedBox(height: 15),
-            Card(
-              elevation: 1,
+          ],
+        ),
+        if (shopping.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 80),
+            child: Center(
               child: Column(
                 children: [
-                  ListTile(
-                    leading: const Icon(Icons.person_add_alt_1_outlined),
-                    title: const Text('Criar conta'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const CriarContaPage(),
-                        ),
-                      );
-                    },
+                  badge(
+                    Icons.shopping_cart_outlined,
+                    softGreen,
+                    darkGreen,
+                    size: 66,
                   ),
-                  const Divider(height: 1),
-                  ListTile(
-                    leading: const Icon(Icons.shopping_cart_outlined),
-                    title: const Text('Lista de compras'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const ListaComprasPage(),
-                        ),
-                      );
-                    },
+                  const SizedBox(height: 15),
+                  Text(
+                    'Sua lista está vazia.',
+                    style: type(15, bold: true),
                   ),
-                  const Divider(height: 1),
-                  ListTile(
-                    leading: const Icon(Icons.notifications_outlined),
-                    title: const Text('Notificações'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () {},
-                  ),
-                  const Divider(height: 1),
-                  ListTile(
-                    leading: const Icon(Icons.settings_outlined),
-                    title: const Text('Configurações'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () {},
+                  Text(
+                    'Adicione o primeiro produto!',
+                    style: type(12, color: muted),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 15),
-            Card(
-              elevation: 1,
-              child: ListTile(
-                leading: const Icon(Icons.info_outline),
-                title: const Text('Sobre o Chefim'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const SobreChefimPage(),
-                    ),
-                  );
-                },
+          )
+        else
+          panel(
+            Column(
+              children: [
+                for (final item in shopping)
+                  Column(
+                    children: [
+                      Row(
+                        children: [
+                          Checkbox(
+                            value: item.checked,
+                            activeColor: green,
+                            onChanged: (value) {
+                              refresh(() {
+                                item.checked = value ?? false;
+                              });
+                            },
+                          ),
+                          Expanded(
+                            child: Text(
+                              item.name,
+                              style: TextStyle(
+                                color: item.checked ? muted : ink,
+                                fontSize: 13,
+                                decoration: item.checked
+                                    ? TextDecoration.lineThrough
+                                    : null,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: () {
+                              refresh(
+                                () => shopping.remove(item),
+                              );
+                            },
+                            icon: Icon(
+                              Icons.delete_outline,
+                              color: muted,
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (item != shopping.last)
+                        Divider(height: 1, color: line),
+                    ],
+                  ),
+              ],
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 9),
+          ),
+      ],
+    );
+  }
+
+  void addShopping(
+    TextEditingController draft,
+    void Function(VoidCallback) refresh,
+  ) {
+    if (draft.text.trim().isEmpty) return;
+
+    refresh(() {
+      shopping.add(ShoppingItem(draft.text.trim()));
+      draft.clear();
+    });
+  }
+
+  Widget aboutPage() => EntryPage(
+        title: 'Sobre o Chefim',
+        builder: (pageContext, refresh) => [
+          const SizedBox(height: 8),
+          panel(
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: softGreen,
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Column(
+                children: [
+                  Text(
+                    'CHEFIM.',
+                    style: type(30, bold: true, color: green),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Sua despensa inteligente',
+                    style: type(14, bold: true),
+                  ),
+                  const SizedBox(height: 9),
+                  Text(
+                    'O Chefim ajuda você a organizar alimentos, '
+                    'acompanhar validades e aproveitar melhor '
+                    'suas compras.',
+                    textAlign: TextAlign.center,
+                    style: type(11, color: muted),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: OutlinedButton(
-                onPressed: () {
-                  nomeUsuarioChefim.value = null;
-                  emailUsuarioChefim.value = null;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Você saiu da conta.'),
+            custom: true,
+          ),
+          section('Como funciona?', ''),
+          step(
+            '1',
+            'Cadastre seus produtos',
+            'Registre alimentos e datas de validade.',
+          ),
+          step(
+            '2',
+            'Receba alertas',
+            'Saiba o que está perto de vencer.',
+          ),
+          step(
+            '3',
+            'Encontre receitas',
+            'Use ingredientes antes que estraguem.',
+          ),
+          const SizedBox(height: 8),
+          panel(
+            Row(
+              children: [
+                badge(
+                  Icons.soup_kitchen_outlined,
+                  softGreen,
+                  darkGreen,
+                ),
+                const SizedBox(width: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Projeto acadêmico',
+                      style: type(13, bold: true),
                     ),
-                  );
-                },
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.red,
-                  side: const BorderSide(color: Colors.red),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                    Text(
+                      'Sprint 2 — Engenharia de Computação',
+                      style: type(11, color: muted),
+                    ),
+                    Text(
+                      'Versão 1.0 • 2026',
+                      style: type(10, color: muted),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () {
+                showDialog(
+                  context: pageContext,
+                  builder: (dialogContext) => AlertDialog(
+                    title: const Text('Termos e Privacidade'),
+                    content: const Text(
+                      'Este protótipo acadêmico não coleta nem '
+                      'armazena dados pessoais. Uma política '
+                      'completa será disponibilizada antes '
+                      'do lançamento.',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () =>
+                            Navigator.pop(dialogContext),
+                        child: const Text('Entendi'),
+                      ),
+                    ],
                   ),
-                ),
-                child: const Text(
-                  'Sair da conta',
-                  style: TextStyle(fontWeight: FontWeight.w600),
-                ),
+                );
+              },
+              icon: const Icon(Icons.lock_outline),
+              label: const Text(
+                'Termos e Política de Privacidade',
+              ),
+            ),
+          ),
+        ],
+      );
+
+  Widget step(
+    String number,
+    String title,
+    String text,
+  ) =>
+      Padding(
+        padding: const EdgeInsets.only(bottom: 16),
+        child: Row(
+          children: [
+            badge(Icons.circle, softGreen, darkGreen),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '$number  $title',
+                    style: type(13, bold: true),
+                  ),
+                  Text(
+                    text,
+                    style: type(11, color: muted),
+                  ),
+                ],
               ),
             ),
           ],
         ),
-      ),
+      );
+
+  Widget settingsPage(bool notifications) {
+    final flags = [true, true, false];
+
+    return EntryPage(
+      title: notifications ? 'Notificações' : 'Configurações',
+      builder: (pageContext, refresh) {
+        final labels = notifications
+            ? [
+                'Produtos perto do vencimento',
+                'Novas receitas disponíveis',
+                'Lembretes da lista de compras',
+              ]
+            : [
+                'Modo econômico de dados',
+                'Sincronização automática',
+                'Sugestões personalizadas',
+              ];
+
+        return [
+          subtitle(
+            notifications
+                ? 'Escolha os alertas que quer receber.'
+                : 'Personalize sua experiência no Chefim.',
+          ),
+          panel(
+            Column(
+              children: [
+                if (!notifications)
+                  SwitchListTile(
+                    title: Text('Modo noturno', style: type(12)),
+                    value: nightMode.value,
+                    activeTrackColor: green,
+                    onChanged: (value) {
+                      nightMode.value = value;
+                      refresh(() {});
+                    },
+                  ),
+                for (int i = 0; i < 3; i++)
+                  SwitchListTile(
+                    title: Text(labels[i], style: type(12)),
+                    value: flags[i],
+                    activeTrackColor: green,
+                    onChanged: (value) {
+                      refresh(() => flags[i] = value);
+                    },
+                  ),
+              ],
+            ),
+            padding: EdgeInsets.zero,
+          ),
+        ];
+      },
     );
   }
 }
 
-class ListaComprasPage extends StatefulWidget {
-  const ListaComprasPage({super.key});
+Widget scroll(List<Widget> children) => ListView(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+      children: children,
+    );
+
+Widget topbar(
+  String title, {
+  VoidCallback? back,
+  Widget? action,
+}) =>
+    SizedBox(
+      height: 50,
+      child: Row(
+        children: [
+          SizedBox(
+            width: 44,
+            child: back == null
+                ? null
+                : IconButton(
+                    onPressed: back,
+                    icon: const Icon(
+                      Icons.arrow_back_ios_new,
+                      size: 19,
+                    ),
+                  ),
+          ),
+          Expanded(
+            child: Text(
+              title,
+              textAlign: TextAlign.center,
+              style: type(18, bold: true),
+            ),
+          ),
+          SizedBox(
+            width: 44,
+            child: action,
+          ),
+        ],
+      ),
+    );
+
+Widget subtitle(String text) => Padding(
+      padding: const EdgeInsets.only(bottom: 18),
+      child: Text(
+        text,
+        textAlign: TextAlign.center,
+        style: type(13, color: muted),
+      ),
+    );
+
+Widget panel(
+  Widget child, {
+  EdgeInsetsGeometry padding = const EdgeInsets.all(14),
+  bool custom = false,
+}) =>
+    Container(
+      padding: custom ? EdgeInsets.zero : padding,
+      decoration: BoxDecoration(
+        color: surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: line),
+        boxShadow: [shadow],
+      ),
+      child: child,
+    );
+
+Widget badge(
+  IconData icon,
+  Color background,
+  Color foreground, {
+  double size = 35,
+}) =>
+    Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(size * .31),
+      ),
+      child: Icon(
+        icon,
+        size: size * .56,
+        color: foreground,
+      ),
+    );
+
+Widget primary(
+  String text,
+  VoidCallback onTap, {
+  IconData? icon,
+  IconData? trailing,
+}) =>
+    SizedBox(
+      width: double.infinity,
+      height: 52,
+      child: ElevatedButton(
+        onPressed: onTap,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: green,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(15),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 21),
+              const SizedBox(width: 8),
+            ],
+            Text(
+              text,
+              style: type(
+                13,
+                bold: true,
+                color: Colors.white,
+              ),
+            ),
+            if (trailing != null) ...[
+              const Spacer(),
+              Icon(trailing),
+            ],
+          ],
+        ),
+      ),
+    );
+
+Widget smallButton(
+  String text,
+  VoidCallback onTap,
+) =>
+    SizedBox(
+      height: 36,
+      child: ElevatedButton(
+        onPressed: onTap,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: green,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(11),
+          ),
+        ),
+        child: Text(
+          text,
+          style: type(
+            12,
+            bold: true,
+            color: Colors.white,
+          ),
+        ),
+      ),
+    );
+
+InputDecoration input(String hint) => InputDecoration(
+      hintText: hint,
+      hintStyle: type(13, color: muted),
+      filled: true,
+      fillColor: surface,
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: 14,
+        vertical: 15,
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(color: line),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(color: green, width: 1.5),
+      ),
+    );
+
+Widget field(
+  String title,
+  String hint,
+  TextEditingController controller, {
+  bool hidden = false,
+  TextInputType? keyboard,
+}) =>
+    Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: type(12, bold: true)),
+        const SizedBox(height: 7),
+        TextField(
+          controller: controller,
+          obscureText: hidden,
+          keyboardType: keyboard,
+          decoration: input(hint),
+        ),
+      ],
+    );
+
+class EntryPage extends StatefulWidget {
+  const EntryPage({
+    super.key,
+    required this.title,
+    required this.builder,
+  });
+
+  final String title;
+  final List<Widget> Function(
+    BuildContext,
+    void Function(VoidCallback),
+  ) builder;
 
   @override
-  State<ListaComprasPage> createState() => _ListaComprasPageState();
+  State<EntryPage> createState() => _EntryPageState();
 }
 
-class _ListaComprasPageState extends State<ListaComprasPage> {
-  final itemController = TextEditingController();
-  final List<Map<String, dynamic>> itens = [];
+class _EntryPageState extends State<EntryPage> {
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        body: SafeArea(
+          child: scroll([
+            topbar(
+              widget.title,
+              back: () => Navigator.pop(context),
+            ),
+            ...widget.builder(
+              context,
+              (fn) => setState(fn),
+            ),
+          ]),
+        ),
+      );
+}
 
-  void adicionarItem() {
-    final nomeItem = itemController.text.trim();
-    if (nomeItem.isEmpty) return;
+class ScaledRecipesPage extends StatefulWidget {
+  const ScaledRecipesPage({super.key});
 
-    setState(() {
-      itens.add({'nome': nomeItem, 'comprado': false});
-      itemController.clear();
-    });
-  }
+  @override
+  State<ScaledRecipesPage> createState() =>
+      _ScaledRecipesPageState();
+}
+
+class _ScaledRecipesPageState extends State<ScaledRecipesPage> {
+  final searchController = TextEditingController();
 
   @override
   void dispose() {
-    itemController.dispose();
+    searchController.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        foregroundColor: verdeChefim,
-        centerTitle: true,
-        title: const Text(
-          'Lista de compras',
-          style: TextStyle(
-            color: Colors.black,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: itemController,
-                    textInputAction: TextInputAction.done,
-                    onSubmitted: (_) => adicionarItem(),
-                    decoration: InputDecoration(
-                      hintText: 'Digite um produto',
-                      filled: true,
-                      fillColor: const Color(0xFFF6F7F8),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                  ),
+  Widget build(BuildContext context) => Scaffold(
+        body: SafeArea(
+          child: scroll([
+            topbar(
+              'Receitas',
+              back: () => Navigator.pop(context),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: searchController,
+              decoration: input('Pesquisar uma receita').copyWith(
+                prefixIcon: Icon(
+                  Icons.search,
+                  color: darkGreen,
                 ),
-                const SizedBox(width: 10),
-                IconButton.filled(
-                  onPressed: adicionarItem,
-                  style: IconButton.styleFrom(backgroundColor: verdeChefim),
-                  icon: const Icon(Icons.add, color: Colors.white),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            Expanded(
-              child: itens.isEmpty
-                  ? const Center(
-                      child: Text(
-                        'Sua lista está vazia.\nAdicione o primeiro produto!',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: cinzaChefim, height: 1.5),
-                      ),
-                    )
-                  : ListView.separated(
-                      itemCount: itens.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final item = itens[index];
-                        final comprado = item['comprado'] as bool;
-
-                        return ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: Checkbox(
-                            value: comprado,
-                            activeColor: verdeChefim,
-                            onChanged: (valor) {
-                              setState(() {
-                                item['comprado'] = valor ?? false;
-                              });
-                            },
-                          ),
-                          title: Text(
-                            item['nome'] as String,
-                            style: TextStyle(
-                              decoration: comprado
-                                  ? TextDecoration.lineThrough
-                                  : TextDecoration.none,
-                              color: comprado ? cinzaChefim : Colors.black,
-                            ),
-                          ),
-                          trailing: IconButton(
-                            tooltip: 'Remover',
-                            onPressed: () {
-                              setState(() {
-                                itens.removeAt(index);
-                              });
-                            },
-                            icon: const Icon(
-                              Icons.delete_outline,
-                              color: Colors.red,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class SobreChefimPage extends StatelessWidget {
-  const SobreChefimPage({super.key});
-
-  void abrirTermos(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Termos e Política de Privacidade'),
-          content: const SingleChildScrollView(
-            child: Text(
-              'TERMOS DE USO\n\n'
-              'O Chefim é um aplicativo acadêmico criado para auxiliar '
-              'na organização de alimentos, controle de validade e '
-              'sugestão de receitas.\n\n'
-              'POLÍTICA DE PRIVACIDADE\n\n'
-              'Os dados informados pelo usuário serão utilizados apenas '
-              'para o funcionamento dos recursos do aplicativo, como '
-              'cadastro, autenticação, produtos da despensa e alertas.\n\n'
-              'As informações pessoais não devem ser compartilhadas '
-              'indevidamente com terceiros.',
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text(
-                'Fechar',
-                style: TextStyle(color: verdeChefim),
               ),
             ),
-          ],
-        );
-      },
-    );
-  }
+          ]),
+        ),
+      );
+}
+
+class ScannerPage extends StatefulWidget {
+  const ScannerPage({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 10),
-              Stack(
-                alignment: Alignment.center,
-                children: [
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: IconButton(
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(
-                        Icons.arrow_back_ios_new,
-                        color: verdeChefim,
-                        size: 20,
-                      ),
-                    ),
-                  ),
-                  const Text(
-                    'Sobre o Chefim',
-                    style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 18),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFEAF8EA),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Column(
-                  children: [
-                    Text(
-                      'CHEFIM',
-                      style: TextStyle(
-                        color: verdeChefim,
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    SizedBox(height: 7),
-                    Text(
-                      'Sua despensa inteligente',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    SizedBox(height: 10),
-                    Text(
-                      'O Chefim ajuda você a organizar alimentos,\n'
-                      'acompanhar validades e aproveitar melhor\n'
-                      'suas compras.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: cinzaChefim,
-                        height: 1.5,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 22),
-              const Text(
-                'Como funciona?',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 14),
-              const PassoSobre(
-                numero: '1',
-                titulo: 'Cadastre seus produtos',
-                subtitulo: 'Registre alimentos e datas de validade.',
-              ),
-              const PassoSobre(
-                numero: '2',
-                titulo: 'Receba alertas',
-                subtitulo: 'Saiba o que está perto de vencer.',
-              ),
-              const PassoSobre(
-                numero: '3',
-                titulo: 'Encontre receitas',
-                subtitulo: 'Use seus ingredientes antes que estraguem.',
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'Projeto acadêmico',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'Sprint 2 — Engenharia de Computação\n'
-                'Versão 1.0 • 2026',
-                style: TextStyle(
-                  color: cinzaChefim,
-                  height: 1.4,
-                ),
-              ),
-              const SizedBox(height: 22),
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: OutlinedButton(
-                  onPressed: () => abrirTermos(context),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: verdeChefim,
-                    side: const BorderSide(color: verdeChefim),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: const Text(
-                    'Termos e Política de Privacidade',
-                    style: TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 30),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  State<ScannerPage> createState() => _ScannerPageState();
 }
 
-class PassoSobre extends StatelessWidget {
-  final String numero;
-  final String titulo;
-  final String subtitulo;
-
-  const PassoSobre({
-    super.key,
-    required this.numero,
-    required this.titulo,
-    required this.subtitulo,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 17),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 25,
-            height: 25,
-            decoration: const BoxDecoration(
-              color: Color(0xFFEAF8EA),
-              shape: BoxShape.circle,
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              numero,
-              style: const TextStyle(
-                color: verdeChefim,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  titulo,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  subtitulo,
-                  style: const TextStyle(
-                    color: cinzaChefim,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ==========================================================
-// SCANNER DE PRODUTOS
-// ==========================================================
-
-class ScannerProdutoPage extends StatefulWidget {
-  const ScannerProdutoPage({super.key});
-
-  @override
-  State<ScannerProdutoPage> createState() => _ScannerProdutoPageState();
-}
-
-class _ScannerProdutoPageState extends State<ScannerProdutoPage> {
-  final MobileScannerController controller = MobileScannerController(
+class _ScannerPageState extends State<ScannerPage> {
+  final camera = MobileScannerController(
     formats: [
       BarcodeFormat.ean13,
       BarcodeFormat.ean8,
@@ -1471,92 +1674,138 @@ class _ScannerProdutoPageState extends State<ScannerProdutoPage> {
     ],
   );
 
-  bool codigoEncontrado = false;
-
-  Future<void> detectarCodigo(BarcodeCapture capture) async {
-    if (codigoEncontrado || capture.barcodes.isEmpty) return;
-
-    final valor = capture.barcodes.first.rawValue;
-
-    if (valor == null || valor.isEmpty) return;
-
-    codigoEncontrado = true;
-    await controller.stop();
-
-    if (!mounted) return;
-    Navigator.pop(context, valor);
-  }
+  bool found = false;
 
   @override
   void dispose() {
-    controller.dispose();
+    camera.dispose();
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: const Text('Escanear produto'),
-        centerTitle: true,
+  Future<void> detected(BarcodeCapture data) async {
+    if (found || data.barcodes.isEmpty) return;
+
+    final code = data.barcodes.first.rawValue;
+    if (code == null || code.isEmpty) return;
+
+    found = true;
+    await camera.stop();
+    if (!mounted) return;
+
+    await showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Produto escaneado'),
+        content: Text(
+          'Código identificado com sucesso\n\n$code',
+        ),
         actions: [
-          IconButton(
-            tooltip: 'Lanterna',
-            onPressed: () => controller.toggleTorch(),
-            icon: const Icon(Icons.flashlight_on_outlined),
-          ),
-          IconButton(
-            tooltip: 'Trocar câmera',
-            onPressed: () => controller.switchCamera(),
-            icon: const Icon(Icons.cameraswitch_outlined),
-          ),
-        ],
-      ),
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          MobileScanner(
-            controller: controller,
-            onDetect: detectarCodigo,
-          ),
-          Center(
-            child: Container(
-              width: 285,
-              height: 180,
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: verdeChefim,
-                  width: 3,
-                ),
-                borderRadius: BorderRadius.circular(18),
-              ),
-            ),
-          ),
-          const Positioned(
-            left: 28,
-            right: 28,
-            bottom: 80,
-            child: Text(
-              'Aponte a câmera para o código de barras do produto',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                shadows: [
-                  Shadow(
-                    blurRadius: 6,
-                    color: Colors.black,
-                  ),
-                ],
-              ),
-            ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Fechar'),
           ),
         ],
       ),
     );
+
+    if (mounted) {
+      found = false;
+      await camera.start();
+    }
   }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        backgroundColor: const Color(0xFF0B100C),
+        body: SafeArea(
+          child: Stack(
+            children: [
+              MobileScanner(
+                controller: camera,
+                onDetect: detected,
+              ),
+              Positioned(
+                top: 2,
+                left: 10,
+                right: 10,
+                child: Row(
+                  children: [
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(
+                        Icons.arrow_back_ios_new,
+                        color: Colors.white,
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        'Escanear produto',
+                        textAlign: TextAlign.center,
+                        style: type(
+                          18,
+                          bold: true,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => camera.toggleTorch(),
+                      icon: const Icon(
+                        Icons.flash_on_outlined,
+                        color: Colors.white,
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => camera.switchCamera(),
+                      icon: const Icon(
+                        Icons.cameraswitch_outlined,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Center(
+                child: Container(
+                  width: 266,
+                  height: 188,
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      color: green,
+                      width: 3,
+                    ),
+                    borderRadius: BorderRadius.circular(17),
+                  ),
+                ),
+              ),
+              Positioned(
+                bottom: 55,
+                left: 20,
+                right: 20,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.qr_code_scanner,
+                      color: green,
+                      size: 35,
+                    ),
+                    const SizedBox(height: 11),
+                    Text(
+                      'Aponte a câmera para o\n'
+                      'código de barras do produto',
+                      textAlign: TextAlign.center,
+                      style: type(
+                        13,
+                        bold: true,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
 }

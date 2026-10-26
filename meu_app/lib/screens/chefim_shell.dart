@@ -28,6 +28,7 @@ class _ChefimShellState extends State<ChefimShell> {
   Future<void> _initializeApp() async {
     try {
       final savedUserId = await PreferencesService.instance.getCurrentUserId();
+
       final savedUser = savedUserId == null
           ? null
           : await DatabaseService.instance.getUserById(savedUserId);
@@ -46,9 +47,11 @@ class _ChefimShellState extends State<ChefimShell> {
         currentUserId = savedUser?.id;
         name = savedUser?.name;
         email = savedUser?.email;
+
         products
           ..clear()
           ..addAll(savedProducts);
+
         sessionLoading = false;
         productsLoading = false;
         productsError = null;
@@ -98,6 +101,7 @@ class _ChefimShellState extends State<ChefimShell> {
 
   Future<void> startUserSession(AppUser user) async {
     final userId = user.id;
+
     if (userId == null) {
       throw StateError('A conta precisa ter um identificador.');
     }
@@ -131,7 +135,41 @@ class _ChefimShellState extends State<ChefimShell> {
     await loadProducts();
   }
 
-  void select(int next) => setState(() => tab = next);
+  Future<void> deleteCurrentAccount() async {
+    final userId = currentUserId;
+
+    if (userId == null) {
+      throw StateError('Nenhuma conta está conectada.');
+    }
+
+    await DatabaseService.instance.deleteUser(userId);
+
+    try {
+      await PreferencesService.instance.clearCurrentUserId();
+    } catch (error) {
+      debugPrint(
+        'Não foi possível limpar imediatamente '
+        'a sessão excluída: $error',
+      );
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      currentUserId = null;
+      name = null;
+      email = null;
+      tab = 0;
+    });
+
+    await loadProducts();
+  }
+
+  void select(int next) {
+    setState(() {
+      tab = next;
+    });
+  }
 
   Future<void> open(Widget page) async {
     await Navigator.push(context, MaterialPageRoute(builder: (_) => page));
@@ -176,36 +214,42 @@ class _ChefimShellState extends State<ChefimShell> {
     );
   }
 
-  Widget nav(int index, String title, IconData icon) => Expanded(
-    child: InkWell(
-      onTap: () => select(index),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, color: index == tab ? green : muted, size: 25),
-          const SizedBox(height: 4),
-          Text(
-            title,
-            style: type(
-              10,
-              bold: index == tab,
-              color: index == tab ? green : muted,
+  Widget nav(int index, String title, IconData icon) {
+    return Expanded(
+      child: InkWell(
+        onTap: () => select(index),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: index == tab ? green : muted, size: 25),
+            const SizedBox(height: 4),
+            Text(
+              title,
+              style: type(
+                10,
+                bold: index == tab,
+                color: index == tab ? green : muted,
+              ),
             ),
-          ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget section(String title, String detail) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 22, bottom: 12),
+      child: Row(
+        children: [
+          Expanded(child: Text(title, style: type(15, bold: true))),
+          Text(detail, style: type(11, color: muted)),
         ],
       ),
-    ),
-  );
+    );
+  }
 
-  Widget section(String title, String detail) => Padding(
-    padding: const EdgeInsets.only(top: 22, bottom: 12),
-    child: Row(
-      children: [
-        Expanded(child: Text(title, style: type(15, bold: true))),
-        Text(detail, style: type(11, color: muted)),
-      ],
-    ),
-  );
-
-  void refresh(VoidCallback action) => setState(action);
+  void refresh(VoidCallback action) {
+    setState(action);
+  }
 }

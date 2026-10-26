@@ -38,8 +38,6 @@ class DatabaseService {
         await _seedInitialData(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
-        // A tabela de usuários precisa existir antes das colunas com chave
-        // estrangeira adicionadas na versão 4.
         if (oldVersion < 4) {
           await _createUsersTable(db);
         }
@@ -165,6 +163,7 @@ class DatabaseService {
     if (total > 0) return;
 
     final batch = db.batch();
+
     batch.insert(_shoppingTable, {
       'user_id': null,
       'name': 'Banana',
@@ -172,6 +171,7 @@ class DatabaseService {
       'unit': 'unidade',
       'checked': 0,
     });
+
     batch.insert(_shoppingTable, {
       'user_id': null,
       'name': 'Ovos',
@@ -179,6 +179,7 @@ class DatabaseService {
       'unit': 'unidade',
       'checked': 1,
     });
+
     batch.insert(_shoppingTable, {
       'user_id': null,
       'name': 'Café',
@@ -186,6 +187,7 @@ class DatabaseService {
       'unit': 'pacote',
       'checked': 0,
     });
+
     await batch.commit(noResult: true);
   }
 
@@ -253,6 +255,7 @@ class DatabaseService {
     required String passwordHash,
   }) async {
     final db = await database;
+
     final user = AppUser(
       name: name.trim(),
       email: email.trim().toLowerCase(),
@@ -262,6 +265,7 @@ class DatabaseService {
 
     return db.transaction((transaction) async {
       final values = user.toMap()..remove('id');
+
       final id = await transaction.insert(
         _usersTable,
         values,
@@ -273,11 +277,11 @@ class DatabaseService {
       );
       final totalUsers = (result.first['total'] as num?)?.toInt() ?? 0;
 
-      // A primeira conta recebe os dados criados antes desta atualização.
       if (totalUsers == 1) {
         await transaction.update(_productsTable, {
           'user_id': id,
         }, where: 'user_id IS NULL');
+
         await transaction.update(_shoppingTable, {
           'user_id': id,
         }, where: 'user_id IS NULL');
@@ -295,6 +299,7 @@ class DatabaseService {
 
   Future<AppUser?> getUserById(int id) async {
     final db = await database;
+
     final records = await db.query(
       _usersTable,
       where: 'id = ?',
@@ -307,6 +312,7 @@ class DatabaseService {
 
   Future<AppUser?> getUserByEmail(String email) async {
     final db = await database;
+
     final records = await db.query(
       _usersTable,
       where: 'email = ? COLLATE NOCASE',
@@ -320,6 +326,52 @@ class DatabaseService {
   Future<bool> emailExists(String email) async {
     final user = await getUserByEmail(email);
     return user != null;
+  }
+
+  Future<void> updateUserPassword({
+    required int userId,
+    required String passwordHash,
+  }) async {
+    final db = await database;
+
+    final updatedRows = await db.update(
+      _usersTable,
+      {'password_hash': passwordHash},
+      where: 'id = ?',
+      whereArgs: [userId],
+    );
+
+    if (updatedRows != 1) {
+      throw StateError('Não foi possível localizar a conta para atualizar.');
+    }
+  }
+
+  Future<void> deleteUser(int userId) async {
+    final db = await database;
+
+    await db.transaction((transaction) async {
+      await transaction.delete(
+        _productsTable,
+        where: 'user_id = ?',
+        whereArgs: [userId],
+      );
+
+      await transaction.delete(
+        _shoppingTable,
+        where: 'user_id = ?',
+        whereArgs: [userId],
+      );
+
+      final deletedRows = await transaction.delete(
+        _usersTable,
+        where: 'id = ?',
+        whereArgs: [userId],
+      );
+
+      if (deletedRows != 1) {
+        throw StateError('Não foi possível localizar a conta para excluir.');
+      }
+    });
   }
 
   Future<List<Product>> getProducts({required int? userId}) async {
@@ -361,11 +413,13 @@ class DatabaseService {
 
   Future<int> deleteProduct(int id) async {
     final db = await database;
+
     return db.delete(_productsTable, where: 'id = ?', whereArgs: [id]);
   }
 
   Future<List<ShoppingItem>> getShoppingItems({required int? userId}) async {
     final db = await database;
+
     final records = await db.query(
       _shoppingTable,
       where: _ownerWhere(userId),
@@ -404,11 +458,13 @@ class DatabaseService {
 
   Future<int> deleteShoppingItem(int id) async {
     final db = await database;
+
     return db.delete(_shoppingTable, where: 'id = ?', whereArgs: [id]);
   }
 
   Future<int> clearShoppingItems({required int? userId}) async {
     final db = await database;
+
     return db.delete(
       _shoppingTable,
       where: _ownerWhere(userId),

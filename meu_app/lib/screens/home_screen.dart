@@ -2,10 +2,16 @@ part of '../main.dart';
 
 extension _HomeScreen on _ChefimShellState {
   Widget home() {
-    final expired = products.where((product) => product.days < 0).length;
-    final expiring = products
-        .where((product) => product.days >= 0 && product.days <= 3)
-        .length;
+    final expired = products.where((product) {
+      final days = product.days;
+      return days != null && days < 0;
+    }).length;
+
+    final expiring = products.where((product) {
+      final days = product.days;
+      return days != null && days >= 0 && days <= 3;
+    }).length;
+
     final hasAttention = expired > 0 || expiring > 0;
 
     return scroll([
@@ -173,11 +179,22 @@ extension _HomeScreen on _ChefimShellState {
       const SizedBox(height: 14),
       primary(
         'Escanear produto',
-        () => open(const ScannerPage()),
+        scanProduct,
         icon: Icons.qr_code_scanner_outlined,
         trailing: Icons.chevron_right,
       ),
     ]);
+  }
+
+  Future<void> scanProduct() async {
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => ScannerPage(userId: currentUserId)),
+    );
+
+    if (changed == true) {
+      await loadProducts();
+    }
   }
 
   Widget stat(String value, String label, IconData icon, Color bg, Color fg) =>

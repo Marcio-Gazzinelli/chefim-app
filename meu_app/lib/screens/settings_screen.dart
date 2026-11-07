@@ -12,7 +12,9 @@ class _SettingsPage extends StatefulWidget {
   final bool notifications;
 
   @override
-  State<_SettingsPage> createState() => _SettingsPageState();
+  State<_SettingsPage> createState() {
+    return _SettingsPageState();
+  }
 }
 
 class _SettingsPageState extends State<_SettingsPage> {
@@ -20,8 +22,7 @@ class _SettingsPageState extends State<_SettingsPage> {
 
   bool _loading = true;
 
-  bool _dataSaver = true;
-  bool _automaticSync = true;
+  bool _dataSaver = false;
   bool _personalizedSuggestions = false;
 
   bool _expiryNotifications = true;
@@ -37,25 +38,32 @@ class _SettingsPageState extends State<_SettingsPage> {
 
   Future<void> _loadPreferences() async {
     final dataSaver = await _preferences.getDataSaver();
-    final automaticSync = await _preferences.getAutomaticSync();
+
     final personalizedSuggestions = await _preferences
         .getPersonalizedSuggestions();
 
     final expiryNotifications = await _preferences.getExpiryNotifications();
+
     final recipeNotifications = await _preferences.getRecipeNotifications();
+
     final shoppingNotifications = await _preferences.getShoppingNotifications();
+
     final expiryWarningDays = await _preferences.getExpiryWarningDays();
 
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
 
     setState(() {
       _dataSaver = dataSaver;
-      _automaticSync = automaticSync;
       _personalizedSuggestions = personalizedSuggestions;
 
       _expiryNotifications = expiryNotifications;
+
       _recipeNotifications = recipeNotifications;
+
       _shoppingNotifications = shoppingNotifications;
+
       _expiryWarningDays = expiryWarningDays;
 
       _loading = false;
@@ -63,57 +71,74 @@ class _SettingsPageState extends State<_SettingsPage> {
   }
 
   Future<void> _changeNightMode(bool value) async {
-    await _preferences.setNightMode(value);
-
     nightMode.value = value;
 
     if (mounted) {
       setState(() {});
     }
+
+    await _preferences.setNightMode(value);
   }
 
   Future<void> _changeDataSaver(bool value) async {
-    setState(() => _dataSaver = value);
+    setState(() {
+      _dataSaver = value;
+    });
+
     await _preferences.setDataSaver(value);
   }
 
-  Future<void> _changeAutomaticSync(bool value) async {
-    setState(() => _automaticSync = value);
-    await _preferences.setAutomaticSync(value);
-  }
-
   Future<void> _changePersonalizedSuggestions(bool value) async {
-    setState(() => _personalizedSuggestions = value);
+    setState(() {
+      _personalizedSuggestions = value;
+    });
+
     await _preferences.setPersonalizedSuggestions(value);
   }
 
   Future<void> _changeExpiryNotifications(bool value) async {
-    setState(() => _expiryNotifications = value);
+    setState(() {
+      _expiryNotifications = value;
+    });
+
     await _preferences.setExpiryNotifications(value);
   }
 
   Future<void> _changeRecipeNotifications(bool value) async {
-    setState(() => _recipeNotifications = value);
+    setState(() {
+      _recipeNotifications = value;
+    });
+
     await _preferences.setRecipeNotifications(value);
   }
 
   Future<void> _changeShoppingNotifications(bool value) async {
-    setState(() => _shoppingNotifications = value);
+    setState(() {
+      _shoppingNotifications = value;
+    });
+
     await _preferences.setShoppingNotifications(value);
   }
 
   Future<void> _changeExpiryWarningDays(int value) async {
-    setState(() => _expiryWarningDays = value);
+    setState(() {
+      _expiryWarningDays = value;
+    });
+
     await _preferences.setExpiryWarningDays(value);
   }
 
   Widget _settingSwitch({
     required String title,
+    String? subtitleText,
     required bool value,
     required Future<void> Function(bool) onChanged,
   }) {
     return SwitchListTile(
       title: Text(title, style: type(12)),
+      subtitle: subtitleText == null
+          ? null
+          : Text(subtitleText, style: type(10, color: muted)),
       value: value,
       activeTrackColor: green,
       onChanged: (newValue) async {
@@ -131,16 +156,17 @@ class _SettingsPageState extends State<_SettingsPage> {
       ),
       _settingSwitch(
         title: 'Modo econômico de dados',
+        subtitleText:
+            'Reduz o uso de imagens e evita '
+            'envios automáticos em dados móveis.',
         value: _dataSaver,
         onChanged: _changeDataSaver,
       ),
       _settingSwitch(
-        title: 'Sincronização automática',
-        value: _automaticSync,
-        onChanged: _changeAutomaticSync,
-      ),
-      _settingSwitch(
         title: 'Sugestões personalizadas',
+        subtitleText:
+            'Usa os produtos da despensa para '
+            'sugerir receitas mais adequadas.',
         value: _personalizedSuggestions,
         onChanged: _changePersonalizedSuggestions,
       ),
@@ -158,7 +184,8 @@ class _SettingsPageState extends State<_SettingsPage> {
         enabled: _expiryNotifications,
         title: Text('Avisar com antecedência', style: type(12)),
         subtitle: Text(
-          'Escolha quantos dias antes do vencimento.',
+          'Escolha quantos dias antes '
+          'do vencimento.',
           style: type(11, color: muted),
         ),
         trailing: DropdownButton<int>(
@@ -176,7 +203,10 @@ class _SettingsPageState extends State<_SettingsPage> {
               .toList(),
           onChanged: _expiryNotifications
               ? (days) async {
-                  if (days == null) return;
+                  if (days == null) {
+                    return;
+                  }
+
                   await _changeExpiryWarningDays(days);
                 }
               : null,
@@ -203,8 +233,10 @@ class _SettingsPageState extends State<_SettingsPage> {
         return [
           subtitle(
             widget.notifications
-                ? 'Escolha os alertas que quer receber.'
-                : 'Personalize sua experiência no Chefim.',
+                ? 'Escolha os alertas que '
+                      'quer receber.'
+                : 'Personalize sua experiência '
+                      'no Chefim.',
           ),
           if (_loading)
             Padding(

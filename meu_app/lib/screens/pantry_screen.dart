@@ -331,20 +331,12 @@ extension _PantryScreen on _ChefimShellState {
     Widget image;
 
     if (product.imageIsRemote) {
-      image = Image.network(
-        imageLocation,
+      image = _DataSaverNetworkImage(
+        imageUrl: imageLocation,
         width: size,
         height: size,
         fit: fit,
-        filterQuality: FilterQuality.high,
-        loadingBuilder: (context, child, loadingProgress) {
-          if (loadingProgress == null) {
-            return child;
-          }
-
-          return fallback();
-        },
-        errorBuilder: (context, error, stackTrace) => fallback(),
+        fallbackBuilder: (_) => fallback(),
       );
     } else {
       image = FutureBuilder<dynamic>(
@@ -790,18 +782,12 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
     Widget image;
 
     if (_isRemoteImage(location)) {
-      image = Image.network(
-        location,
+      image = _DataSaverNetworkImage(
+        imageUrl: location,
         width: size,
         height: size,
         fit: BoxFit.cover,
-        filterQuality: FilterQuality.high,
-        loadingBuilder: (context, child, progress) {
-          return progress == null ? child : fallback();
-        },
-        errorBuilder: (context, error, stackTrace) {
-          return fallback();
-        },
+        fallbackBuilder: (_) => fallback(),
       );
     } else {
       image = FutureBuilder<dynamic>(
@@ -1101,6 +1087,148 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Exibe imagens da internet respeitando a preferência de economia de dados.
+///
+/// Quando o modo econômico está ativo, a imagem somente é baixada depois de
+/// um toque explícito do usuário. Imagens locais não passam por este widget.
+class _DataSaverNetworkImage extends StatefulWidget {
+  const _DataSaverNetworkImage({
+    required this.imageUrl,
+    required this.width,
+    required this.height,
+    required this.fit,
+    required this.fallbackBuilder,
+  });
+
+  final String imageUrl;
+  final double width;
+  final double height;
+  final BoxFit fit;
+  final WidgetBuilder fallbackBuilder;
+
+  @override
+  State<_DataSaverNetworkImage> createState() {
+    return _DataSaverNetworkImageState();
+  }
+}
+
+class _DataSaverNetworkImageState extends State<_DataSaverNetworkImage> {
+  bool _loadingPreference = true;
+  bool _dataSaverEnabled = true;
+  bool _loadThisImage = false;
+  int _preferenceRequest = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPreference();
+  }
+
+  @override
+  void didUpdateWidget(covariant _DataSaverNetworkImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.imageUrl != widget.imageUrl) {
+      _loadThisImage = false;
+    }
+
+    // Confere novamente quando o usuário volta das configurações.
+    _loadPreference();
+  }
+
+  Future<void> _loadPreference() async {
+    final request = ++_preferenceRequest;
+    var enabled = true;
+
+    try {
+      enabled = await PreferencesService.instance.getDataSaver();
+    } catch (_) {
+      // Em caso de falha, utiliza a opção que consome menos dados.
+      enabled = true;
+    }
+
+    if (!mounted || request != _preferenceRequest) {
+      return;
+    }
+
+    if (_loadingPreference || enabled != _dataSaverEnabled) {
+      setState(() {
+        _dataSaverEnabled = enabled;
+        _loadingPreference = false;
+      });
+    }
+  }
+
+  Widget _economyPlaceholder() {
+    final showText = widget.width >= 100 && widget.height >= 90;
+
+    return Semantics(
+      button: true,
+      label: 'Carregar foto usando a internet',
+      child: Tooltip(
+        message: 'Toque para carregar a foto',
+        child: Material(
+          color: softGreen,
+          child: InkWell(
+            onTap: () {
+              setState(() {
+                _loadThisImage = true;
+              });
+            },
+            child: SizedBox(
+              width: widget.width,
+              height: widget.height,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.cloud_download_outlined,
+                    color: darkGreen,
+                    size: showText ? 32 : widget.width * 0.42,
+                  ),
+                  if (showText) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      'Toque para carregar',
+                      textAlign: TextAlign.center,
+                      style: type(9, color: muted),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loadingPreference) {
+      return widget.fallbackBuilder(context);
+    }
+
+    if (_dataSaverEnabled && !_loadThisImage) {
+      return _economyPlaceholder();
+    }
+
+    return Image.network(
+      widget.imageUrl,
+      width: widget.width,
+      height: widget.height,
+      fit: widget.fit,
+      filterQuality: FilterQuality.high,
+      loadingBuilder: (context, child, progress) {
+        return progress == null ? child : widget.fallbackBuilder(context);
+      },
+      errorBuilder: (context, error, stackTrace) {
+        return widget.fallbackBuilder(context);
+      },
     );
   }
 }

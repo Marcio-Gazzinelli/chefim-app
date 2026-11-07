@@ -237,8 +237,7 @@ class _ScannerPageState extends State<ScannerPage> with WidgetsBindingObserver {
           await DatabaseService.instance.updateProduct(currentProduct);
         }
       } catch (_) {
-        // A falta de internet não impede
-        // a atualização da quantidade.
+        // A falta de internet não impede a atualização da quantidade.
       }
     }
 
@@ -252,10 +251,12 @@ class _ScannerPageState extends State<ScannerPage> with WidgetsBindingObserver {
         return;
       }
 
-      if (labelScan != null) {
+      final capturedLabel = labelScan;
+
+      if (capturedLabel != null) {
         catalogProduct = _mergeCatalogWithLabel(
           catalogProduct,
-          labelScan.catalogProduct,
+          capturedLabel.catalogProduct,
         );
 
         final reviewedProduct = await showModalBottomSheet<Product>(
@@ -270,6 +271,9 @@ class _ScannerPageState extends State<ScannerPage> with WidgetsBindingObserver {
             catalogProduct: catalogProduct,
             initialExpiry: currentProduct.expiryDate,
             existingProduct: currentProduct,
+            onLabelScanned: (result) {
+              labelScan = result;
+            },
           ),
         );
 
@@ -314,10 +318,12 @@ class _ScannerPageState extends State<ScannerPage> with WidgetsBindingObserver {
         amountToAdd: amount,
       );
 
-      if (labelScan != null) {
+      final scannedLabel = labelScan;
+
+      if (scannedLabel != null) {
         await _sendLabelSuggestion(
           product: updatedProduct,
-          labelScan: labelScan,
+          labelScan: scannedLabel,
         );
       }
 
@@ -327,10 +333,7 @@ class _ScannerPageState extends State<ScannerPage> with WidgetsBindingObserver {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            'Estoque de ${currentProduct.name} '
-            'atualizado.',
-          ),
+          content: Text('Estoque de ${currentProduct.name} atualizado.'),
         ),
       );
 
@@ -362,29 +365,39 @@ class _ScannerPageState extends State<ScannerPage> with WidgetsBindingObserver {
         catalogProduct = await ProductCatalogService.instance.findByGtin(
           parsed.gtin!,
         );
-
-        if (catalogProduct == null) {
-          catalogWarning =
-              'Produto não encontrado no catálogo. '
-              'Complete os dados.';
-        }
       } on ProductCatalogException catch (error) {
         catalogWarning = error.message;
       }
     }
 
-    if (parsed.gtin != null &&
-        (catalogProduct == null || !catalogProduct.hasNutrition) &&
-        mounted) {
+    if (!mounted) {
+      return;
+    }
+
+    if (catalogProduct == null) {
+      final shouldRegisterManually = await _confirmManualRegistration(
+        barcode: parsed.databaseCode,
+        detail: catalogWarning,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      if (!shouldRegisterManually) {
+        await _resumeScanner();
+        return;
+      }
+    } else if (!catalogProduct.hasNutrition && parsed.gtin != null) {
       labelScan = await _offerLabelPhoto(barcode: parsed.gtin!);
 
-      if (labelScan != null) {
+      final capturedLabel = labelScan;
+
+      if (capturedLabel != null) {
         catalogProduct = _mergeCatalogWithLabel(
           catalogProduct,
-          labelScan.catalogProduct,
+          capturedLabel.catalogProduct,
         );
-
-        catalogWarning = null;
       }
     }
 
@@ -395,11 +408,6 @@ class _ScannerPageState extends State<ScannerPage> with WidgetsBindingObserver {
     setState(() {
       processingMessage = null;
     });
-
-    if (catalogWarning != null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(catalogWarning)));
-    }
 
     final product = await showModalBottomSheet<Product>(
       context: context,
@@ -412,6 +420,9 @@ class _ScannerPageState extends State<ScannerPage> with WidgetsBindingObserver {
         barcode: parsed.databaseCode,
         catalogProduct: catalogProduct,
         initialExpiry: parsed.expiryDate,
+        onLabelScanned: (result) {
+          labelScan = result;
+        },
       ),
     );
 
@@ -431,8 +442,13 @@ class _ScannerPageState extends State<ScannerPage> with WidgetsBindingObserver {
         product.copyWith(userId: widget.userId),
       );
 
-      if (labelScan != null) {
-        await _sendLabelSuggestion(product: savedProduct, labelScan: labelScan);
+      final scannedLabel = labelScan;
+
+      if (scannedLabel != null) {
+        await _sendLabelSuggestion(
+          product: savedProduct,
+          labelScan: scannedLabel,
+        );
       }
 
       if (!mounted) {
@@ -455,6 +471,62 @@ class _ScannerPageState extends State<ScannerPage> with WidgetsBindingObserver {
     }
   }
 
+  Future<bool> _confirmManualRegistration({
+    required String barcode,
+    String? detail,
+  }) async {
+    if (!mounted) {
+      return false;
+    }
+
+    setState(() {
+      processingMessage = null;
+    });
+
+    final shouldRegister = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Produto não encontrado'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Não encontramos esse código nos catálogos '
+              'consultados. Você pode cadastrar o produto '
+              'manualmente e, no próximo passo, fotografar '
+              'a tabela nutricional se desejar.',
+            ),
+            const SizedBox(height: 12),
+            Text('Código: $barcode', style: type(11, color: muted)),
+            if (detail?.trim().isNotEmpty == true) ...[
+              const SizedBox(height: 8),
+              Text(detail!.trim(), style: type(10, color: muted)),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogContext, false);
+            },
+            child: const Text('Escanear novamente'),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              Navigator.pop(dialogContext, true);
+            },
+            icon: const Icon(Icons.edit_outlined),
+            label: const Text('Cadastrar manualmente'),
+          ),
+        ],
+      ),
+    );
+
+    return shouldRegister ?? false;
+  }
+
   Future<LabelScanResult?> _offerLabelPhoto({required String barcode}) async {
     if (!mounted) {
       return null;
@@ -467,11 +539,13 @@ class _ScannerPageState extends State<ScannerPage> with WidgetsBindingObserver {
     final source = await showDialog<ImageSource>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Informações nutricionais não encontradas'),
+        title: const Text('Tabela nutricional indisponível'),
         content: const Text(
-          'Fotografe somente a tabela nutricional '
-          'ou escolha uma foto nítida da galeria. '
-          'Evite reflexos e deixe a coluna de 100 g '
+          'O produto foi identificado, mas o catálogo '
+          'não possui todos os dados nutricionais. '
+          'Fotografe somente a tabela nutricional ou '
+          'escolha uma foto nítida da galeria. Evite '
+          'reflexos e deixe a coluna de 100 g '
           'completamente visível.',
         ),
         actions: [
@@ -518,8 +592,8 @@ class _ScannerPageState extends State<ScannerPage> with WidgetsBindingObserver {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'O texto foi lido, mas os valores '
-              'não ficaram claros. Os campos não '
+              'O texto foi lido, mas os valores não '
+              'ficaram claros. Os campos não '
               'identificados deverão ser preenchidos '
               'manualmente.',
             ),
@@ -615,6 +689,19 @@ class _ScannerPageState extends State<ScannerPage> with WidgetsBindingObserver {
     required Product product,
     required LabelScanResult labelScan,
   }) async {
+    var dataSaverEnabled = true;
+
+    try {
+      dataSaverEnabled = await PreferencesService.instance.getDataSaver();
+    } catch (_) {
+      // Se a preferência não puder ser lida, evita o envio da foto grande.
+      dataSaverEnabled = true;
+    }
+
+    if (dataSaverEnabled) {
+      return;
+    }
+
     try {
       await SupabaseCatalogService.instance.submitLabelSuggestion(
         product: product,
@@ -635,6 +722,8 @@ class _ScannerPageState extends State<ScannerPage> with WidgetsBindingObserver {
       return;
     }
 
+    LabelScanResult? labelScan;
+
     final product = await showModalBottomSheet<Product>(
       context: context,
       isScrollControlled: true,
@@ -643,7 +732,11 @@ class _ScannerPageState extends State<ScannerPage> with WidgetsBindingObserver {
         borderRadius: BorderRadius.vertical(top: Radius.circular(27)),
       ),
       builder: (_) {
-        return const _ScannedProductFormSheet();
+        return _ScannedProductFormSheet(
+          onLabelScanned: (result) {
+            labelScan = result;
+          },
+        );
       },
     );
 
@@ -653,9 +746,17 @@ class _ScannerPageState extends State<ScannerPage> with WidgetsBindingObserver {
     }
 
     try {
-      await DatabaseService.instance.createProduct(
+      final savedProduct = await DatabaseService.instance.createProduct(
         product.copyWith(userId: widget.userId),
       );
+
+      if (labelScan != null &&
+          savedProduct.barcode?.trim().isNotEmpty == true) {
+        await _sendLabelSuggestion(
+          product: savedProduct,
+          labelScan: labelScan!,
+        );
+      }
 
       if (!mounted) {
         return;
@@ -762,9 +863,7 @@ class _ScannerPageState extends State<ScannerPage> with WidgetsBindingObserver {
             ),
             Center(
               child: Semantics(
-                label:
-                    'Área para posicionar o código '
-                    'de barras',
+                label: 'Área para posicionar o código de barras',
                 child: FractionallySizedBox(
                   widthFactor: .78,
                   child: AspectRatio(
@@ -788,8 +887,7 @@ class _ScannerPageState extends State<ScannerPage> with WidgetsBindingObserver {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    'Aponte para um EAN, UPC ou '
-                    'QR Code',
+                    'Aponte para um EAN, UPC ou QR Code',
                     textAlign: TextAlign.center,
                     style: type(13, bold: true, color: Colors.white),
                   ),
@@ -868,13 +966,11 @@ class _CameraPermissionPage extends StatelessWidget {
               const SizedBox(height: 8),
               Text(
                 permanentlyDenied
-                    ? 'A permissão foi bloqueada. '
-                          'Abra as configurações do '
-                          'celular e autorize a câmera '
-                          'para o Chefim.'
-                    : 'O Chefim usa a câmera somente '
-                          'para identificar o código do '
-                          'produto.',
+                    ? 'A permissão foi bloqueada. Abra as '
+                          'configurações do celular e autorize '
+                          'a câmera para o Chefim.'
+                    : 'O Chefim usa a câmera somente para '
+                          'identificar o código do produto.',
                 textAlign: TextAlign.center,
                 style: type(13, color: muted),
               ),
@@ -1036,12 +1132,14 @@ class _ScannedProductFormSheet extends StatefulWidget {
     this.catalogProduct,
     this.initialExpiry,
     this.existingProduct,
+    this.onLabelScanned,
   });
 
   final String? barcode;
   final CatalogProduct? catalogProduct;
   final DateTime? initialExpiry;
   final Product? existingProduct;
+  final ValueChanged<LabelScanResult>? onLabelScanned;
 
   @override
   State<_ScannedProductFormSheet> createState() {
@@ -1071,7 +1169,11 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
   String? selectedImageLocation;
   XFile? pendingProductImage;
 
+  late CatalogProduct? currentCatalogProduct;
+
   bool saving = false;
+  bool readingNutrition = false;
+  bool nutritionReadFromLabel = false;
 
   bool get isEditing {
     return widget.existingProduct != null;
@@ -1081,15 +1183,20 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
   void initState() {
     super.initState();
 
+    currentCatalogProduct = widget.catalogProduct;
+
+    nutritionReadFromLabel =
+        currentCatalogProduct?.source.contains('Rótulo fotografado') ?? false;
+
     nameController = TextEditingController(
-      text: widget.existingProduct?.name ?? widget.catalogProduct?.name ?? '',
+      text: widget.existingProduct?.name ?? currentCatalogProduct?.name ?? '',
     );
 
     quantityController = TextEditingController(
       text: _formatAmount(widget.existingProduct?.quantity ?? 1),
     );
 
-    final catalog = widget.catalogProduct;
+    final catalog = currentCatalogProduct;
     final existing = widget.existingProduct;
 
     energyController = _numberController(
@@ -1127,7 +1234,7 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
     expiryDate = widget.existingProduct?.expiryDate ?? widget.initialExpiry;
 
     final initialImage =
-        widget.existingProduct?.imageUrl ?? widget.catalogProduct?.imageUrl;
+        widget.existingProduct?.imageUrl ?? currentCatalogProduct?.imageUrl;
 
     selectedImageLocation = initialImage?.trim().isEmpty == true
         ? null
@@ -1176,6 +1283,193 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
     final value = _optionalNumber(controller);
 
     return value == null || value < 0;
+  }
+
+  Future<void> _readNutritionLabel() async {
+    if (readingNutrition || saving) {
+      return;
+    }
+
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.document_scanner_outlined),
+                title: const Text('Fotografar tabela nutricional'),
+                subtitle: const Text(
+                  'Enquadre somente a tabela e '
+                  'evite reflexos',
+                ),
+                onTap: () {
+                  Navigator.pop(sheetContext, ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('Escolher foto da galeria'),
+                subtitle: const Text(
+                  'Use uma imagem nítida e bem '
+                  'iluminada',
+                ),
+                onTap: () {
+                  Navigator.pop(sheetContext, ImageSource.gallery);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.close),
+                title: const Text('Cancelar'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (!mounted || source == null) {
+      return;
+    }
+
+    setState(() {
+      readingNutrition = true;
+    });
+
+    final barcode = (widget.existingProduct?.barcode ?? widget.barcode)?.trim();
+
+    final ocrBarcode = barcode?.isNotEmpty == true ? barcode! : 'sem-codigo';
+
+    try {
+      final result = source == ImageSource.camera
+          ? await LabelOcrService.instance.captureAndRead(barcode: ocrBarcode)
+          : await LabelOcrService.instance.chooseFromGalleryAndRead(
+              barcode: ocrBarcode,
+            );
+
+      if (!mounted || result == null) {
+        return;
+      }
+
+      _applyLabelResult(result);
+      widget.onLabelScanned?.call(result);
+
+      final message = result.catalogProduct.hasNutrition
+          ? 'Valores encontrados. Confira e corrija '
+                'os campos antes de salvar.'
+          : 'O texto foi lido, mas os valores não '
+                'ficaram claros. Preencha os campos '
+                'manualmente.';
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+    } on LabelOcrException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Não foi possível analisar a foto '
+              'do rótulo.',
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          readingNutrition = false;
+        });
+      }
+    }
+  }
+
+  void _applyLabelResult(LabelScanResult result) {
+    final label = result.catalogProduct;
+
+    setState(() {
+      currentCatalogProduct = _mergeCatalogProducts(
+        currentCatalogProduct,
+        label,
+      );
+
+      _fillNutritionController(energyController, label.energyKcal100g);
+
+      _fillNutritionController(
+        carbohydratesController,
+        label.carbohydrates100g,
+      );
+
+      _fillNutritionController(proteinsController, label.proteins100g);
+
+      _fillNutritionController(fatController, label.fat100g);
+
+      _fillNutritionController(saturatedFatController, label.saturatedFat100g);
+
+      _fillNutritionController(sugarsController, label.sugars100g);
+
+      _fillNutritionController(fiberController, label.fiber100g);
+
+      _fillNutritionController(
+        sodiumController,
+        label.sodium100g == null ? null : label.sodium100g! * 1000,
+      );
+
+      nutritionReadFromLabel = true;
+    });
+  }
+
+  CatalogProduct _mergeCatalogProducts(
+    CatalogProduct? catalog,
+    CatalogProduct label,
+  ) {
+    if (catalog == null) {
+      return label;
+    }
+
+    final sources = <String>{catalog.source, label.source}.join(' + ');
+
+    return CatalogProduct(
+      barcode: catalog.barcode,
+      source: sources,
+      name: catalog.name ?? label.name,
+      brand: catalog.brand ?? label.brand,
+      packageQuantity: catalog.packageQuantity ?? label.packageQuantity,
+      imageUrl: catalog.imageUrl ?? label.imageUrl,
+      ingredients: label.ingredients ?? catalog.ingredients,
+      allergens: label.allergens ?? catalog.allergens,
+      servingSize: label.servingSize ?? catalog.servingSize,
+      energyKcal100g: label.energyKcal100g ?? catalog.energyKcal100g,
+      carbohydrates100g: label.carbohydrates100g ?? catalog.carbohydrates100g,
+      proteins100g: label.proteins100g ?? catalog.proteins100g,
+      fat100g: label.fat100g ?? catalog.fat100g,
+      saturatedFat100g: label.saturatedFat100g ?? catalog.saturatedFat100g,
+      sugars100g: label.sugars100g ?? catalog.sugars100g,
+      fiber100g: label.fiber100g ?? catalog.fiber100g,
+      sodium100g: label.sodium100g ?? catalog.sodium100g,
+    );
+  }
+
+  void _fillNutritionController(
+    TextEditingController controller,
+    double? value,
+  ) {
+    if (value != null) {
+      controller.text = _formatAmount(value);
+    }
   }
 
   Future<void> _pickExpiry() async {
@@ -1389,14 +1683,12 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
     if (_isRemoteImage(location)) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(16),
-        child: Image.network(
-          location,
+        child: _DataSaverNetworkImage(
+          imageUrl: location,
           width: 140,
           height: 140,
           fit: BoxFit.contain,
-          errorBuilder: (context, error, stackTrace) {
-            return _imagePlaceholder();
-          },
+          fallbackBuilder: (_) => _imagePlaceholder(),
         ),
       );
     }
@@ -1405,7 +1697,7 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
   }
 
   String _resolvedDataSource() {
-    final catalogSource = widget.catalogProduct?.source.trim();
+    final catalogSource = currentCatalogProduct?.source.trim();
 
     final existingSource = widget.existingProduct?.dataSource?.trim();
 
@@ -1427,7 +1719,7 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
   }
 
   Future<void> _submit() async {
-    if (saving) {
+    if (saving || readingNutrition) {
       return;
     }
 
@@ -1440,10 +1732,7 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
     if (name.isEmpty || quantity == null || quantity <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Informe o nome e uma '
-            'quantidade válida.',
-          ),
+          content: Text('Informe o nome e uma quantidade válida.'),
         ),
       );
 
@@ -1509,8 +1798,7 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
       return;
     }
 
-    final catalog = widget.catalogProduct;
-
+    final catalog = currentCatalogProduct;
     final sodium = _optionalNumber(sodiumController);
 
     Navigator.pop(
@@ -1546,7 +1834,9 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final catalog = widget.catalogProduct;
+    final catalog = currentCatalogProduct;
+
+    final isManualRegistration = !isEditing && widget.catalogProduct == null;
 
     return Padding(
       padding: EdgeInsets.fromLTRB(
@@ -1561,13 +1851,21 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              isEditing ? 'Conferir dados do produto' : 'Confirmar produto',
+              isEditing
+                  ? 'Conferir dados do produto'
+                  : isManualRegistration
+                  ? 'Cadastrar produto manualmente'
+                  : 'Confirmar produto',
               style: type(20, bold: true),
             ),
             const SizedBox(height: 5),
             Text(
-              'Confira os dados antes de '
-              'salvar na despensa.',
+              isManualRegistration
+                  ? 'Preencha os dados disponíveis. '
+                        'A validade e as informações '
+                        'nutricionais são opcionais.'
+                  : 'Confira os dados antes de salvar '
+                        'na despensa.',
               style: type(12, color: muted),
             ),
             const SizedBox(height: 14),
@@ -1589,9 +1887,9 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
               ),
             ),
             Text(
-              'A foto da embalagem é '
-              'independente da foto usada para '
-              'ler a tabela nutricional.',
+              'A foto da embalagem é independente '
+              'da foto usada para ler a tabela '
+              'nutricional.',
               style: type(10, color: muted),
             ),
             if (widget.barcode != null) ...[
@@ -1692,24 +1990,27 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
             if (widget.barcode != null && widget.initialExpiry == null) ...[
               const SizedBox(height: 6),
               Text(
-                'A validade não está no EAN '
-                'comum. Você pode informar a '
-                'data impressa na embalagem ou '
-                'deixar este campo vazio.',
+                'A validade não está no EAN comum. '
+                'Você pode informar a data impressa '
+                'na embalagem ou deixar este campo '
+                'vazio.',
                 style: type(10, color: muted),
               ),
             ] else if (expiryDate == null) ...[
               const SizedBox(height: 6),
               Text(
-                'Você pode cadastrar o produto '
-                'sem informar a validade.',
+                'Você pode cadastrar o produto sem '
+                'informar a validade.',
                 style: type(10, color: muted),
               ),
             ],
             const SizedBox(height: 14),
             ExpansionTile(
               initiallyExpanded:
-                  catalog?.source.contains('Rótulo fotografado') ?? false,
+                  catalog == null ||
+                  !catalog.hasNutrition ||
+                  nutritionReadFromLabel ||
+                  catalog.source.contains('Rótulo fotografado'),
               tilePadding: EdgeInsets.zero,
               childrenPadding: const EdgeInsets.only(bottom: 8),
               title: Text(
@@ -1722,7 +2023,68 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
                 style: type(10, color: muted),
               ),
               children: [
-                if (catalog?.source.contains('Rótulo fotografado') ?? false)
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: softGreen,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: line),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        catalog == null
+                            ? 'Informação nutricional '
+                                  'não cadastrada'
+                            : catalog.hasNutrition
+                            ? 'Confira os valores '
+                                  'nutricionais'
+                            : 'O catálogo não possui '
+                                  'os valores nutricionais',
+                        style: type(11, bold: true),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        'Você pode preencher os campos '
+                        'manualmente ou ler a tabela '
+                        'nutricional usando a câmera '
+                        'ou uma foto da galeria.',
+                        style: type(10, color: muted),
+                      ),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: saving || readingNutrition
+                              ? null
+                              : _readNutritionLabel,
+                          icon: readingNutrition
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.document_scanner_outlined),
+                          label: Text(
+                            readingNutrition
+                                ? 'Analisando tabela...'
+                                : nutritionReadFromLabel
+                                ? 'Ler tabela novamente'
+                                : 'Ler tabela nutricional',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (catalog != null &&
+                    (nutritionReadFromLabel ||
+                        catalog.source.contains('Rótulo fotografado')))
                   Container(
                     width: double.infinity,
                     margin: const EdgeInsets.only(bottom: 12),
@@ -1732,7 +2094,7 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
-                      catalog!.source.contains('parcial')
+                      catalog.source.contains('parcial')
                           ? 'Alguns valores foram '
                                 'extraídos da foto. '
                                 'Preencha os campos '

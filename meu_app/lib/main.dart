@@ -17,7 +17,7 @@ part 'core/app_theme.dart';
 part 'models/app_user.dart';
 part 'models/catalog_product.dart';
 part 'models/product.dart';
-
+part 'models/recipe.dart';
 part 'widgets/common_widgets.dart';
 
 part 'screens/about_screen.dart';
@@ -43,6 +43,7 @@ part 'services/label_ocr_service.dart';
 part 'services/password_service.dart';
 part 'services/preferences_service.dart';
 part 'services/product_catalog_service.dart';
+part 'services/recipe_suggestion_service.dart';
 part 'services/supabase_catalog_service.dart';
 
 Future<void> main() async {

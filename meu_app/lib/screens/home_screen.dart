@@ -9,10 +9,17 @@ extension _HomeScreen on _ChefimShellState {
 
     final expiring = products.where((product) {
       final days = product.days;
-      return days != null && days >= 0 && days <= 3;
+
+      return days != null && days >= 0 && days <= expiryWarningDays;
     }).length;
 
     final hasAttention = expired > 0 || expiring > 0;
+
+    final attentionFilter = expired > 0
+        ? PantryFilter.expired
+        : expiring > 0
+        ? PantryFilter.expiring
+        : PantryFilter.all;
 
     return scroll([
       Row(
@@ -89,12 +96,16 @@ extension _HomeScreen on _ChefimShellState {
                           : expiring > 0
                           ? 'Você tem $expiring produto'
                                 '${expiring == 1 ? '' : 's'} próximo'
-                                '${expiring == 1 ? '' : 's'} do vencimento.'
+                                '${expiring == 1 ? '' : 's'} '
+                                'do vencimento.'
                           : 'Nenhum produto perto do vencimento.',
                       style: type(12, color: muted),
                     ),
                     const SizedBox(height: 12),
-                    smallButton('Ver produtos', () => select(1)),
+                    smallButton(
+                      'Ver produtos',
+                      () => openPantry(attentionFilter),
+                    ),
                   ],
                 ),
               ),
@@ -138,6 +149,7 @@ extension _HomeScreen on _ChefimShellState {
               Icons.inventory_2_outlined,
               softGreen,
               darkGreen,
+              onTap: () => openPantry(PantryFilter.all),
             ),
           ),
           const SizedBox(width: 10),
@@ -148,6 +160,7 @@ extension _HomeScreen on _ChefimShellState {
               Icons.access_time,
               rose,
               red,
+              onTap: () => openPantry(PantryFilter.expiring),
             ),
           ),
         ],
@@ -162,6 +175,7 @@ extension _HomeScreen on _ChefimShellState {
               Icons.soup_kitchen_outlined,
               gold,
               const Color(0xFFD29219),
+              onTap: () => select(2),
             ),
           ),
           const SizedBox(width: 10),
@@ -172,44 +186,63 @@ extension _HomeScreen on _ChefimShellState {
               Icons.event_busy_outlined,
               rose,
               red,
+              onTap: () => openPantry(PantryFilter.expired),
             ),
           ),
         ],
       ),
-      const SizedBox(height: 14),
-      primary(
-        'Escanear produto',
-        scanProduct,
-        icon: Icons.qr_code_scanner_outlined,
-        trailing: Icons.chevron_right,
-      ),
     ]);
   }
 
-  Future<void> scanProduct() async {
-    final changed = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(builder: (_) => ScannerPage(userId: currentUserId)),
-    );
-
-    if (changed == true) {
-      await loadProducts();
-    }
-  }
-
-  Widget stat(String value, String label, IconData icon, Color bg, Color fg) =>
-      panel(
-        SizedBox(
-          height: 125,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              badge(icon, bg, fg),
-              const SizedBox(height: 8),
-              Text(value, style: type(22, bold: true)),
-              Text(label, maxLines: 2, style: type(11, color: muted)),
-            ],
+  Widget stat(
+    String value,
+    String label,
+    IconData icon,
+    Color bg,
+    Color fg, {
+    required VoidCallback onTap,
+  }) {
+    return Semantics(
+      button: true,
+      label: '$label: $value',
+      child: Stack(
+        children: [
+          SizedBox(
+            width: double.infinity,
+            child: panel(
+              SizedBox(
+                width: double.infinity,
+                height: 125,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    badge(icon, bg, fg),
+                    const SizedBox(height: 8),
+                    Text(value, style: type(22, bold: true)),
+                    const SizedBox(height: 2),
+                    Expanded(
+                      child: Text(
+                        label,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: type(11, color: muted),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
-        ),
-      );
+          Positioned.fill(
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(18),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(onTap: onTap),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

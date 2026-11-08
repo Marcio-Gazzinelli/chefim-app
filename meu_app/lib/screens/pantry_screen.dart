@@ -11,10 +11,17 @@ extension _PantryScreen on _ChefimShellState {
 
     final expiring = products.where((product) {
       final days = product.days;
-      return days != null && days >= 0 && days <= 3;
+
+      return days != null && days >= 0 && days <= expiryWarningDays;
     }).length;
 
     final hasAlert = expired > 0 || expiring > 0;
+
+    final visibleProducts = products.where(_matchesPantryFilter).toList();
+
+    final warningPeriod = expiryWarningDays == 1
+        ? 'no próximo dia'
+        : 'nos próximos $expiryWarningDays dias';
 
     return scroll([
       topbar('Minha despensa'),
@@ -36,16 +43,18 @@ extension _PantryScreen on _ChefimShellState {
                 children: [
                   Text(
                     expired > 0
-                        ? '$expired produto${expired == 1 ? '' : 's'} vencido'
+                        ? '$expired produto'
+                              '${expired == 1 ? '' : 's'} vencido'
                               '${expired == 1 ? '' : 's'}'
                         : expiring > 0
-                        ? '$expiring produto${expiring == 1 ? '' : 's'} vence'
+                        ? '$expiring produto'
+                              '${expiring == 1 ? '' : 's'} vence'
                               '${expiring == 1 ? '' : 'm'}'
                         : 'Nenhum produto vence',
                     style: type(12, bold: true),
                   ),
                   Text(
-                    expired > 0 ? 'Revise sua despensa' : 'nos próximos 3 dias',
+                    expired > 0 ? 'Revise sua despensa' : warningPeriod,
                     style: type(
                       12,
                       bold: hasAlert,
@@ -59,11 +68,48 @@ extension _PantryScreen on _ChefimShellState {
         ),
       ),
       const SizedBox(height: 12),
-      primary('Adicionar produto', addProduct, icon: Icons.add),
+      primary(
+        'Escanear produto',
+        scanProduct,
+        icon: Icons.qr_code_scanner_outlined,
+        trailing: Icons.chevron_right,
+      ),
+      const SizedBox(height: 10),
+      SizedBox(
+        width: double.infinity,
+        child: OutlinedButton.icon(
+          onPressed: addProduct,
+          icon: const Icon(Icons.add),
+          label: const Text('Adicionar manualmente'),
+        ),
+      ),
+      const SizedBox(height: 12),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          _pantryFilterChip(
+            filter: PantryFilter.all,
+            label: 'Todos',
+            icon: Icons.inventory_2_outlined,
+          ),
+          _pantryFilterChip(
+            filter: PantryFilter.expiring,
+            label: 'Próximos',
+            icon: Icons.access_time,
+          ),
+          _pantryFilterChip(
+            filter: PantryFilter.expired,
+            label: 'Vencidos',
+            icon: Icons.event_busy_outlined,
+          ),
+        ],
+      ),
       if (!productsLoading && productsError == null)
         section(
-          'Produtos da despensa',
-          '${products.length} ${products.length == 1 ? 'item' : 'itens'}',
+          _pantrySectionTitle(),
+          '${visibleProducts.length} '
+          '${visibleProducts.length == 1 ? 'item' : 'itens'}',
         ),
       if (productsLoading)
         const Padding(
@@ -104,14 +150,110 @@ extension _PantryScreen on _ChefimShellState {
             ],
           ),
         ),
+      if (!productsLoading &&
+          productsError == null &&
+          products.isNotEmpty &&
+          visibleProducts.isEmpty)
+        _emptyFilteredPantry(),
       if (!productsLoading && productsError == null)
-        ...products.map(
+        ...visibleProducts.map(
           (product) => Padding(
             padding: const EdgeInsets.only(bottom: 10),
             child: productCard(product),
           ),
         ),
     ]);
+  }
+
+  bool _matchesPantryFilter(Product product) {
+    final days = product.days;
+
+    switch (pantryFilter) {
+      case PantryFilter.all:
+        return true;
+
+      case PantryFilter.expiring:
+        return days != null && days >= 0 && days <= expiryWarningDays;
+
+      case PantryFilter.expired:
+        return days != null && days < 0;
+    }
+  }
+
+  String _pantrySectionTitle() {
+    switch (pantryFilter) {
+      case PantryFilter.all:
+        return 'Produtos da despensa';
+
+      case PantryFilter.expiring:
+        return 'Próximos do vencimento';
+
+      case PantryFilter.expired:
+        return 'Produtos vencidos';
+    }
+  }
+
+  Widget _pantryFilterChip({
+    required PantryFilter filter,
+    required String label,
+    required IconData icon,
+  }) {
+    final selected = pantryFilter == filter;
+
+    return ChoiceChip(
+      selected: selected,
+      showCheckmark: false,
+      selectedColor: green,
+      backgroundColor: surface,
+      side: BorderSide(color: selected ? green : line),
+      avatar: Icon(icon, size: 17, color: selected ? Colors.white : darkGreen),
+      label: Text(
+        label,
+        style: type(10, bold: selected, color: selected ? Colors.white : ink),
+      ),
+      onSelected: (_) => setPantryFilter(filter),
+    );
+  }
+
+  Widget _emptyFilteredPantry() {
+    final showingExpired = pantryFilter == PantryFilter.expired;
+
+    return panel(
+      Column(
+        children: [
+          Icon(
+            showingExpired ? Icons.event_available_outlined : Icons.access_time,
+            color: muted,
+            size: 38,
+          ),
+          const SizedBox(height: 10),
+          Text(
+            showingExpired
+                ? 'Nenhum produto vencido.'
+                : 'Nenhum produto próximo do vencimento.',
+            textAlign: TextAlign.center,
+            style: type(13, bold: true),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            showingExpired
+                ? 'Sua despensa não possui produtos vencidos.'
+                : 'O prazo configurado é de '
+                      '$expiryWarningDays '
+                      '${expiryWarningDays == 1 ? 'dia' : 'dias'}.',
+            textAlign: TextAlign.center,
+            style: type(11, color: muted),
+          ),
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: () {
+              setPantryFilter(PantryFilter.all);
+            },
+            child: const Text('Mostrar todos'),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget productCard(Product product) {
@@ -121,7 +263,7 @@ extension _PantryScreen on _ChefimShellState {
         ? muted
         : days < 0
         ? red
-        : days <= 3
+        : days <= expiryWarningDays
         ? const Color(0xFFE08A00)
         : darkGreen;
 
@@ -270,7 +412,8 @@ extension _PantryScreen on _ChefimShellState {
                     .map(
                       (entry) => _productDetail(
                         entry.$1,
-                        '${_formatAmount(entry.$2!)} ${entry.$3}',
+                        '${_formatAmount(entry.$2!)} '
+                        '${entry.$3}',
                       ),
                     ),
               ],
@@ -293,7 +436,9 @@ extension _PantryScreen on _ChefimShellState {
         ),
         actions: [
           FilledButton(
-            onPressed: () => Navigator.pop(dialogContext),
+            onPressed: () {
+              Navigator.pop(dialogContext);
+            },
             child: const Text('Fechar'),
           ),
         ],
@@ -356,7 +501,9 @@ extension _PantryScreen on _ChefimShellState {
             height: size,
             fit: fit,
             filterQuality: FilterQuality.high,
-            errorBuilder: (context, error, stackTrace) => fallback(),
+            errorBuilder: (context, error, stackTrace) {
+              return fallback();
+            },
           );
         },
       );
@@ -412,7 +559,9 @@ extension _PantryScreen on _ChefimShellState {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(27)),
       ),
-      builder: (sheetContext) => _ProductFormSheet(product: product),
+      builder: (sheetContext) {
+        return _ProductFormSheet(product: product);
+      },
     );
 
     if (formProduct == null || !mounted) {
@@ -427,9 +576,7 @@ extension _PantryScreen on _ChefimShellState {
           productToSave,
         );
 
-        if (!mounted) {
-          return;
-        }
+        if (!mounted) return;
 
         refresh(() {
           products.add(savedProduct);
@@ -438,9 +585,7 @@ extension _PantryScreen on _ChefimShellState {
       } else {
         await DatabaseService.instance.updateProduct(formProduct);
 
-        if (!mounted) {
-          return;
-        }
+        if (!mounted) return;
 
         refresh(() {
           final index = products.indexWhere(
@@ -465,9 +610,7 @@ extension _PantryScreen on _ChefimShellState {
         ),
       );
     } catch (_) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Não foi possível salvar o produto.')),
@@ -510,15 +653,20 @@ extension _PantryScreen on _ChefimShellState {
       builder: (dialogContext) => AlertDialog(
         title: const Text('Remover produto?'),
         content: Text(
-          '${product.name} será removido permanentemente da despensa.',
+          '${product.name} será removido '
+          'permanentemente da despensa.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
+            onPressed: () {
+              Navigator.pop(dialogContext, false);
+            },
             child: const Text('Cancelar'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
+            onPressed: () {
+              Navigator.pop(dialogContext, true);
+            },
             child: const Text('Remover'),
           ),
         ],
@@ -532,9 +680,7 @@ extension _PantryScreen on _ChefimShellState {
     try {
       await DatabaseService.instance.deleteProduct(product.id!);
 
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
 
       refresh(() {
         products.removeWhere((savedProduct) => savedProduct.id == product.id);
@@ -544,9 +690,7 @@ extension _PantryScreen on _ChefimShellState {
         const SnackBar(content: Text('Produto removido da despensa.')),
       );
     } catch (_) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Não foi possível remover o produto.')),
@@ -640,7 +784,10 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
     if (kIsWeb) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('A troca de foto está disponível no Android e iOS.'),
+          content: Text(
+            'A troca de foto está disponível '
+            'no Android e iOS.',
+          ),
         ),
       );
       return;
@@ -661,21 +808,24 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
               ListTile(
                 leading: const Icon(Icons.photo_camera_outlined),
                 title: const Text('Tirar foto'),
-                onTap: () =>
-                    Navigator.pop(actionContext, _PantryImageAction.camera),
+                onTap: () {
+                  Navigator.pop(actionContext, _PantryImageAction.camera);
+                },
               ),
               ListTile(
                 leading: const Icon(Icons.photo_library_outlined),
                 title: const Text('Escolher da galeria'),
-                onTap: () =>
-                    Navigator.pop(actionContext, _PantryImageAction.gallery),
+                onTap: () {
+                  Navigator.pop(actionContext, _PantryImageAction.gallery);
+                },
               ),
               if (_hasImage)
                 ListTile(
                   leading: Icon(Icons.delete_outline, color: red),
                   title: Text('Remover foto', style: TextStyle(color: red)),
-                  onTap: () =>
-                      Navigator.pop(actionContext, _PantryImageAction.remove),
+                  onTap: () {
+                    Navigator.pop(actionContext, _PantryImageAction.remove);
+                  },
                 ),
             ],
           ),
@@ -715,9 +865,7 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
         _imageLocation = image.path;
       });
     } catch (_) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Não foi possível selecionar a foto.')),
@@ -739,6 +887,7 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
     }
 
     final databasesDirectory = await getDatabasesPath();
+
     final originalExtension = p.extension(pendingImage.path).toLowerCase();
 
     final validExtension = RegExp(r'^\.[a-z0-9]{1,5}$')
@@ -852,9 +1001,7 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
     try {
       final savedImageLocation = await _savePendingImage();
 
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
 
       Navigator.pop(
         context,
@@ -884,9 +1031,7 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
         ),
       );
     } catch (_) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
 
       setState(() {
         _saving = false;
@@ -1091,10 +1236,12 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
   }
 }
 
-/// Exibe imagens da internet respeitando a preferência de economia de dados.
+/// Exibe imagens da internet respeitando a preferência
+/// de economia de dados.
 ///
-/// Quando o modo econômico está ativo, a imagem somente é baixada depois de
-/// um toque explícito do usuário. Imagens locais não passam por este widget.
+/// Quando o modo econômico está ativo, a imagem somente
+/// é baixada depois de um toque explícito do usuário.
+/// Imagens locais não passam por este widget.
 class _DataSaverNetworkImage extends StatefulWidget {
   const _DataSaverNetworkImage({
     required this.imageUrl,
@@ -1136,7 +1283,6 @@ class _DataSaverNetworkImageState extends State<_DataSaverNetworkImage> {
       _loadThisImage = false;
     }
 
-    // Confere novamente quando o usuário volta das configurações.
     _loadPreference();
   }
 
@@ -1147,7 +1293,6 @@ class _DataSaverNetworkImageState extends State<_DataSaverNetworkImage> {
     try {
       enabled = await PreferencesService.instance.getDataSaver();
     } catch (_) {
-      // Em caso de falha, utiliza a opção que consome menos dados.
       enabled = true;
     }
 

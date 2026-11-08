@@ -1,5 +1,7 @@
 part of '../main.dart';
 
+enum PantryFilter { all, expiring, expired }
+
 class ChefimShell extends StatefulWidget {
   const ChefimShell({super.key});
 
@@ -15,6 +17,9 @@ class _ChefimShellState extends State<ChefimShell> {
 
   final products = <Product>[];
 
+  PantryFilter pantryFilter = PantryFilter.all;
+  int expiryWarningDays = 3;
+
   bool sessionLoading = true;
   bool productsLoading = true;
   String? productsError;
@@ -23,6 +28,17 @@ class _ChefimShellState extends State<ChefimShell> {
   void initState() {
     super.initState();
     _initializeApp();
+  }
+
+  Future<int> _readExpiryWarningDays() async {
+    try {
+      final savedDays = await PreferencesService.instance
+          .getExpiryWarningDays();
+
+      return savedDays > 0 ? savedDays : 3;
+    } catch (_) {
+      return 3;
+    }
   }
 
   Future<void> _initializeApp() async {
@@ -41,12 +57,15 @@ class _ChefimShellState extends State<ChefimShell> {
         userId: savedUser?.id,
       );
 
+      final savedExpiryWarningDays = await _readExpiryWarningDays();
+
       if (!mounted) return;
 
       setState(() {
         currentUserId = savedUser?.id;
         name = savedUser?.name;
         email = savedUser?.email;
+        expiryWarningDays = savedExpiryWarningDays;
 
         products
           ..clear()
@@ -65,6 +84,16 @@ class _ChefimShellState extends State<ChefimShell> {
         productsError = 'Não foi possível carregar os dados do aplicativo.';
       });
     }
+  }
+
+  Future<void> _reloadExpiryWarningDays() async {
+    final savedExpiryWarningDays = await _readExpiryWarningDays();
+
+    if (!mounted) return;
+
+    setState(() {
+      expiryWarningDays = savedExpiryWarningDays;
+    });
   }
 
   Future<void> loadProducts() async {
@@ -114,6 +143,7 @@ class _ChefimShellState extends State<ChefimShell> {
       currentUserId = userId;
       name = user.name;
       email = user.email;
+      pantryFilter = PantryFilter.all;
       tab = 0;
     });
 
@@ -129,6 +159,7 @@ class _ChefimShellState extends State<ChefimShell> {
       currentUserId = null;
       name = null;
       email = null;
+      pantryFilter = PantryFilter.all;
       tab = 0;
     });
 
@@ -159,6 +190,7 @@ class _ChefimShellState extends State<ChefimShell> {
       currentUserId = null;
       name = null;
       email = null;
+      pantryFilter = PantryFilter.all;
       tab = 0;
     });
 
@@ -168,15 +200,43 @@ class _ChefimShellState extends State<ChefimShell> {
   void select(int next) {
     setState(() {
       tab = next;
+
+      if (next == 1) {
+        pantryFilter = PantryFilter.all;
+      }
     });
+  }
+
+  void openPantry([PantryFilter filter = PantryFilter.all]) {
+    setState(() {
+      pantryFilter = filter;
+      tab = 1;
+    });
+  }
+
+  void setPantryFilter(PantryFilter filter) {
+    setState(() {
+      pantryFilter = filter;
+    });
+  }
+
+  Future<void> scanProduct() async {
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => ScannerPage(userId: currentUserId)),
+    );
+
+    if (changed == true) {
+      await loadProducts();
+    }
   }
 
   Future<void> open(Widget page) async {
     await Navigator.push(context, MaterialPageRoute(builder: (_) => page));
 
-    if (mounted) {
-      setState(() {});
-    }
+    if (!mounted) return;
+
+    await _reloadExpiryWarningDays();
   }
 
   @override

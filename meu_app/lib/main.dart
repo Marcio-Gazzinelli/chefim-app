@@ -18,6 +18,7 @@ part 'models/app_user.dart';
 part 'models/catalog_product.dart';
 part 'models/product.dart';
 part 'models/recipe.dart';
+
 part 'widgets/common_widgets.dart';
 
 part 'screens/about_screen.dart';
@@ -38,6 +39,7 @@ part 'screens/splash_screen.dart';
 part 'screens/terms_screen.dart';
 
 part 'services/barcode_parser_service.dart';
+part 'services/cosmos_catalog_service.dart';
 part 'services/database_service.dart';
 part 'services/label_ocr_service.dart';
 part 'services/password_service.dart';

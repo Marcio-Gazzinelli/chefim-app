@@ -12,35 +12,53 @@ class ProductCatalogException implements Exception {
 }
 
 /// Orquestra as fontes de catálogo na seguinte ordem:
-/// 1. Open Food Facts;
-/// 2. catálogo próprio e revisado do Chefim no Supabase.
+/// 1. catálogo próprio e revisado do Chefim no Supabase;
+/// 2. Open Food Facts;
+/// 3. cache privado do Cosmos e, se necessário, API do Cosmos.
 class ProductCatalogService {
   ProductCatalogService._();
 
   static final ProductCatalogService instance = ProductCatalogService._();
 
   Future<CatalogProduct?> findByGtin(String gtin) async {
-    CatalogProduct? openFoodFactsProduct;
-    Object? openFoodFactsError;
+    final barcode = gtin.replaceAll(RegExp(r'\D'), '');
 
-    try {
-      openFoodFactsProduct = await _findOnOpenFoodFacts(gtin);
-    } catch (error) {
-      openFoodFactsError = error;
+    if (!const <int>{8, 12, 13, 14}.contains(barcode.length)) {
+      return null;
     }
 
-    CatalogProduct? communityProduct;
-
-    if (_needsComplement(openFoodFactsProduct)) {
-      communityProduct = await SupabaseCatalogService.instance.findByGtin(gtin);
-    }
-
-    final result = _mergeProducts(
-      primary: openFoodFactsProduct,
-      fallback: communityProduct,
+    // O catálogo revisado do Chefim tem prioridade sobre qualquer fonte
+    // externa. Campos ausentes ainda podem ser complementados.
+    CatalogProduct? result = await SupabaseCatalogService.instance.findByGtin(
+      barcode,
     );
 
-    if (result != null) {
+    Object? openFoodFactsError;
+
+    if (_needsOpenFoodFactsComplement(result)) {
+      CatalogProduct? openFoodFactsProduct;
+
+      try {
+        openFoodFactsProduct = await _findOnOpenFoodFacts(barcode);
+      } catch (error) {
+        openFoodFactsError = error;
+      }
+
+      result = _mergeProducts(primary: result, fallback: openFoodFactsProduct);
+    }
+
+    // O Cosmos não fornece a tabela nutricional. Portanto, ele somente é
+    // consultado quando pode complementar a identificação ou a imagem do
+    // produto, evitando gastar a franquia por falta de nutrientes.
+    if (_needsCosmosComplement(result)) {
+      final cosmosProduct = await CosmosCatalogService.instance.findByGtin(
+        barcode,
+      );
+
+      result = _mergeProducts(primary: result, fallback: cosmosProduct);
+    }
+
+    if (result?.hasUsefulData == true) {
       return result;
     }
 
@@ -108,11 +126,17 @@ class ProductCatalogService {
     return catalogProduct.hasUsefulData ? catalogProduct : null;
   }
 
-  bool _needsComplement(CatalogProduct? product) {
+  bool _needsOpenFoodFactsComplement(CatalogProduct? product) {
     return product == null ||
         product.name?.trim().isNotEmpty != true ||
         product.imageUrl?.trim().isNotEmpty != true ||
         !product.hasNutrition;
+  }
+
+  bool _needsCosmosComplement(CatalogProduct? product) {
+    return product == null ||
+        product.name?.trim().isNotEmpty != true ||
+        product.imageUrl?.trim().isNotEmpty != true;
   }
 
   CatalogProduct? _mergeProducts({

@@ -216,6 +216,7 @@ class _ScannerPageState extends State<ScannerPage> with WidgetsBindingObserver {
     final needsComplement =
         product.imageUrl?.trim().isNotEmpty != true ||
         product.brand?.trim().isNotEmpty != true ||
+        !product.hasPackageInfo ||
         !product.hasNutrition;
 
     if (needsComplement && barcode != null && barcode.isNotEmpty) {
@@ -295,13 +296,13 @@ class _ScannerPageState extends State<ScannerPage> with WidgetsBindingObserver {
       processingMessage = null;
     });
 
-    final amount = await showDialog<double>(
+    final increment = await showDialog<_StockIncrementSelection>(
       context: context,
       barrierDismissible: false,
       builder: (_) => _StockIncrementDialog(product: currentProduct),
     );
 
-    if (amount == null) {
+    if (increment == null) {
       await _resumeScanner();
       return;
     }
@@ -315,7 +316,8 @@ class _ScannerPageState extends State<ScannerPage> with WidgetsBindingObserver {
     try {
       final updatedProduct = await DatabaseService.instance.updateQuantity(
         product: currentProduct,
-        amountToAdd: amount,
+        amountToAdd: increment.amount,
+        packagesToAdd: increment.packages,
       );
 
       final scannedLabel = labelScan;
@@ -664,7 +666,36 @@ class _ScannerPageState extends State<ScannerPage> with WidgetsBindingObserver {
       catalog.source,
     }.join(' + ');
 
+    var quantity = product.quantity;
+    var unit = product.unit;
+    double? packageSize = product.packageSize;
+    int? packageCount = product.packageCount;
+
+    final catalogMeasure = _parsePackageMeasure(catalog.packageQuantity);
+
+    if (!product.hasPackageInfo && catalogMeasure != null) {
+      if (product.unit == 'unidade' &&
+          product.quantity == product.quantity.roundToDouble()) {
+        packageSize = catalogMeasure.size;
+        packageCount = product.quantity.toInt();
+        unit = catalogMeasure.unit;
+        quantity = catalogMeasure.size * product.quantity.toInt();
+      } else if (product.unit == catalogMeasure.unit) {
+        final inferredCount = product.quantity / catalogMeasure.size;
+        final roundedCount = inferredCount.round();
+
+        if (roundedCount > 0 && (inferredCount - roundedCount).abs() < 0.0001) {
+          packageSize = catalogMeasure.size;
+          packageCount = roundedCount;
+        }
+      }
+    }
+
     return product.copyWith(
+      quantity: quantity,
+      unit: unit,
+      packageSize: packageSize,
+      packageCount: packageCount,
       brand: product.brand ?? catalog.brand,
 
       // Preserva a imagem escolhida pelo usuário.
@@ -1018,6 +1049,8 @@ class _ScannerError extends StatelessWidget {
   }
 }
 
+typedef _StockIncrementSelection = ({double amount, int packages});
+
 class _StockIncrementDialog extends StatefulWidget {
   const _StockIncrementDialog({required this.product});
 
@@ -1032,6 +1065,9 @@ class _StockIncrementDialog extends StatefulWidget {
 class _StockIncrementDialogState extends State<_StockIncrementDialog> {
   late final double step;
   late double amount;
+  int packages = 1;
+
+  bool get tracksPackages => widget.product.hasPackageInfo;
 
   @override
   void initState() {
@@ -1043,12 +1079,16 @@ class _StockIncrementDialogState extends State<_StockIncrementDialog> {
       _ => 1,
     };
 
-    amount = step;
+    amount = tracksPackages ? widget.product.packageSize! : step;
   }
 
   @override
   Widget build(BuildContext context) {
-    final newTotal = widget.product.quantity + amount;
+    final amountToAdd = tracksPackages
+        ? widget.product.packageSize! * packages
+        : amount;
+
+    final newTotal = widget.product.quantity + amountToAdd;
 
     return AlertDialog(
       title: const Text('Produto já cadastrado'),
@@ -1063,14 +1103,27 @@ class _StockIncrementDialogState extends State<_StockIncrementDialog> {
             style: type(12, color: muted),
           ),
           const SizedBox(height: 18),
-          Text('Quantidade a adicionar', style: type(12, bold: true)),
+          Text(
+            tracksPackages
+                ? 'Embalagens a adicionar'
+                : 'Quantidade a adicionar',
+            style: type(12, bold: true),
+          ),
           const SizedBox(height: 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               IconButton.filledTonal(
                 tooltip: 'Diminuir quantidade',
-                onPressed: amount <= step
+                onPressed: tracksPackages
+                    ? packages <= 1
+                          ? null
+                          : () {
+                              setState(() {
+                                packages--;
+                              });
+                            }
+                    : amount <= step
                     ? null
                     : () {
                         setState(() {
@@ -1082,8 +1135,11 @@ class _StockIncrementDialogState extends State<_StockIncrementDialog> {
               SizedBox(
                 width: 115,
                 child: Text(
-                  '${_formatAmount(amount)} '
-                  '${widget.product.unit}',
+                  tracksPackages
+                      ? '$packages '
+                            '${packages == 1 ? 'embalagem' : 'embalagens'}'
+                      : '${_formatAmount(amount)} '
+                            '${widget.product.unit}',
                   textAlign: TextAlign.center,
                   style: type(16, bold: true),
                 ),
@@ -1092,7 +1148,11 @@ class _StockIncrementDialogState extends State<_StockIncrementDialog> {
                 tooltip: 'Aumentar quantidade',
                 onPressed: () {
                   setState(() {
-                    amount += step;
+                    if (tracksPackages) {
+                      packages++;
+                    } else {
+                      amount += step;
+                    }
                   });
                 },
                 icon: const Icon(Icons.add),
@@ -1100,6 +1160,15 @@ class _StockIncrementDialogState extends State<_StockIncrementDialog> {
             ],
           ),
           const SizedBox(height: 8),
+          if (tracksPackages) ...[
+            Text(
+              'Cada embalagem: '
+              '${_formatAmount(widget.product.packageSize!)} '
+              '${widget.product.unit}',
+              style: type(11, color: muted),
+            ),
+            const SizedBox(height: 4),
+          ],
           Text(
             'Novo total: '
             '${_formatAmount(newTotal)} '
@@ -1117,7 +1186,10 @@ class _StockIncrementDialogState extends State<_StockIncrementDialog> {
         ),
         FilledButton(
           onPressed: () {
-            Navigator.pop(context, amount);
+            Navigator.pop(context, (
+              amount: amountToAdd,
+              packages: tracksPackages ? packages : 0,
+            ));
           },
           child: const Text('Atualizar estoque'),
         ),
@@ -1153,7 +1225,8 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
   final ImagePicker _productImagePicker = ImagePicker();
 
   late final TextEditingController nameController;
-  late final TextEditingController quantityController;
+  late final TextEditingController capacityController;
+  late final TextEditingController packageCountController;
   late final TextEditingController energyController;
   late final TextEditingController carbohydratesController;
   late final TextEditingController proteinsController;
@@ -1192,12 +1265,61 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
       text: widget.existingProduct?.name ?? currentCatalogProduct?.name ?? '',
     );
 
-    quantityController = TextEditingController(
-      text: _formatAmount(widget.existingProduct?.quantity ?? 1),
-    );
-
     final catalog = currentCatalogProduct;
     final existing = widget.existingProduct;
+    final catalogMeasure = _parsePackageMeasure(catalog?.packageQuantity);
+
+    late final double initialCapacity;
+    late final int initialPackageCount;
+
+    if (existing?.hasPackageInfo == true) {
+      final savedProduct = existing!;
+
+      initialCapacity = savedProduct.packageSize!;
+      initialPackageCount = savedProduct.packageCount!;
+      unit = savedProduct.unit;
+    } else if (catalogMeasure != null) {
+      initialCapacity = catalogMeasure.size;
+      unit = catalogMeasure.unit;
+
+      if (existing != null && existing.unit == unit) {
+        final inferredCount = existing.quantity / initialCapacity;
+        final roundedCount = inferredCount.round();
+
+        initialPackageCount =
+            roundedCount > 0 && (inferredCount - roundedCount).abs() < 0.0001
+            ? roundedCount
+            : 1;
+      } else {
+        initialPackageCount = 1;
+      }
+    } else if (existing != null) {
+      unit = existing.unit;
+
+      if (existing.unit == 'unidade' &&
+          existing.quantity == existing.quantity.roundToDouble()) {
+        initialCapacity = 1;
+        initialPackageCount = existing.quantity.toInt();
+      } else {
+        initialCapacity = existing.quantity;
+        initialPackageCount = 1;
+      }
+    } else {
+      initialCapacity = 1;
+      initialPackageCount = 1;
+      unit = 'unidade';
+    }
+
+    capacityController = TextEditingController(
+      text: _formatAmount(initialCapacity),
+    );
+
+    packageCountController = TextEditingController(
+      text: '$initialPackageCount',
+    );
+
+    capacityController.addListener(_refreshCalculatedTotal);
+    packageCountController.addListener(_refreshCalculatedTotal);
 
     energyController = _numberController(
       catalog?.energyKcal100g ?? existing?.energyKcal100g,
@@ -1229,8 +1351,6 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
 
     sodiumController = _numberController(sodium == null ? null : sodium * 1000);
 
-    unit = widget.existingProduct?.unit ?? 'unidade';
-
     expiryDate = widget.existingProduct?.expiryDate ?? widget.initialExpiry;
 
     final initialImage =
@@ -1244,7 +1364,8 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
   @override
   void dispose() {
     nameController.dispose();
-    quantityController.dispose();
+    capacityController.dispose();
+    packageCountController.dispose();
     energyController.dispose();
     carbohydratesController.dispose();
     proteinsController.dispose();
@@ -1255,6 +1376,37 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
     sodiumController.dispose();
 
     super.dispose();
+  }
+
+  void _refreshCalculatedTotal() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  double? get _capacity {
+    return _parseAmount(capacityController.text.trim());
+  }
+
+  int? get _packageCount {
+    final value = int.tryParse(packageCountController.text.trim());
+
+    if (value == null || value <= 0) {
+      return null;
+    }
+
+    return value;
+  }
+
+  double? get _calculatedTotal {
+    final capacity = _capacity;
+    final count = _packageCount;
+
+    if (capacity == null || count == null) {
+      return null;
+    }
+
+    return capacity * count;
   }
 
   TextEditingController _numberController(double? value) {
@@ -1724,15 +1876,20 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
     }
 
     final name = nameController.text.trim();
+    final capacity = _capacity;
+    final packageCount = _packageCount;
+    final quantity = _calculatedTotal;
 
-    final quantity = double.tryParse(
-      quantityController.text.trim().replaceAll(',', '.'),
-    );
-
-    if (name.isEmpty || quantity == null || quantity <= 0) {
+    if (name.isEmpty ||
+        capacity == null ||
+        packageCount == null ||
+        quantity == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Informe o nome e uma quantidade válida.'),
+          content: Text(
+            'Informe o nome, a capacidade e uma quantidade '
+            'de embalagens válida.',
+          ),
         ),
       );
 
@@ -1810,6 +1967,8 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
         userId: widget.existingProduct?.userId,
         quantity: quantity,
         unit: unit,
+        packageSize: capacity,
+        packageCount: packageCount,
         calories: widget.existingProduct?.calories,
         barcode: widget.existingProduct?.barcode ?? widget.barcode,
         brand: catalog?.brand ?? widget.existingProduct?.brand,
@@ -1916,9 +2075,9 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
               children: [
                 Expanded(
                   child: field(
-                    isEditing ? 'Quantidade atual' : 'Quantidade inicial',
-                    'Ex.: 1',
-                    quantityController,
+                    'Capacidade por embalagem',
+                    'Ex.: 150',
+                    capacityController,
                     keyboard: const TextInputType.numberWithOptions(
                       decimal: true,
                     ),
@@ -1929,7 +2088,7 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Unidade', style: type(12, bold: true)),
+                      Text('Unidade de medida', style: type(12, bold: true)),
                       const SizedBox(height: 7),
                       DropdownButtonFormField<String>(
                         initialValue: unit,
@@ -1954,6 +2113,47 @@ class _ScannedProductFormSheetState extends State<_ScannedProductFormSheet> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 14),
+            field(
+              isEditing
+                  ? 'Quantidade atual de embalagens'
+                  : 'Quantidade de embalagens',
+              'Ex.: 3',
+              packageCountController,
+              keyboard: TextInputType.number,
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                color: softGreen,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: line),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.calculate_outlined, color: darkGreen),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Quantidade total', style: type(10, color: muted)),
+                        const SizedBox(height: 2),
+                        Text(
+                          _calculatedTotal == null
+                              ? 'Preencha a capacidade e as embalagens'
+                              : '${_formatAmount(_calculatedTotal!)} '
+                                    '${_displayUnit(unit, _calculatedTotal!)}',
+                          style: type(13, bold: true, color: darkGreen),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 14),
             Text('Data de validade (opcional)', style: type(12, bold: true)),

@@ -19,6 +19,8 @@ class _ChefimShellState extends State<ChefimShell> {
 
   PantryFilter pantryFilter = PantryFilter.all;
   int expiryWarningDays = 3;
+  final TextEditingController pantrySearchController = TextEditingController();
+  String pantrySearchQuery = '';
 
   bool sessionLoading = true;
   bool productsLoading = true;
@@ -28,6 +30,31 @@ class _ChefimShellState extends State<ChefimShell> {
   void initState() {
     super.initState();
     _initializeApp();
+  }
+
+  @override
+  void dispose() {
+    pantrySearchController.dispose();
+    super.dispose();
+  }
+
+  void setPantrySearch(String value) {
+    setState(() {
+      pantrySearchQuery = value;
+    });
+  }
+
+  void clearPantrySearch() {
+    pantrySearchController.clear();
+
+    setState(() {
+      pantrySearchQuery = '';
+    });
+  }
+
+  void _resetPantrySearch() {
+    pantrySearchController.clear();
+    pantrySearchQuery = '';
   }
 
   Future<int> _readExpiryWarningDays() async {
@@ -139,6 +166,8 @@ class _ChefimShellState extends State<ChefimShell> {
 
     if (!mounted) return;
 
+    _resetPantrySearch();
+
     setState(() {
       currentUserId = userId;
       name = user.name;
@@ -154,6 +183,8 @@ class _ChefimShellState extends State<ChefimShell> {
     await PreferencesService.instance.clearCurrentUserId();
 
     if (!mounted) return;
+
+    _resetPantrySearch();
 
     setState(() {
       currentUserId = null;
@@ -186,6 +217,8 @@ class _ChefimShellState extends State<ChefimShell> {
 
     if (!mounted) return;
 
+    _resetPantrySearch();
+
     setState(() {
       currentUserId = null;
       name = null;
@@ -198,6 +231,10 @@ class _ChefimShellState extends State<ChefimShell> {
   }
 
   void select(int next) {
+    if (next == 1) {
+      _resetPantrySearch();
+    }
+
     setState(() {
       tab = next;
 
@@ -208,6 +245,8 @@ class _ChefimShellState extends State<ChefimShell> {
   }
 
   void openPantry([PantryFilter filter = PantryFilter.all]) {
+    _resetPantrySearch();
+
     setState(() {
       pantryFilter = filter;
       tab = 1;

@@ -7,7 +7,7 @@ class DatabaseService {
 
   static const String _databaseName = 'chefim.db';
 
-  static const int _databaseVersion = 6;
+  static const int _databaseVersion = 7;
 
   static const String _usersTable = 'users';
 
@@ -80,6 +80,10 @@ class DatabaseService {
           await _upgradeToVersion6(db);
         }
 
+        if (oldVersion < 7) {
+          await _upgradeToVersion7(db);
+        }
+
         /*
          * A criação com IF NOT EXISTS garante
          * que os índices estejam presentes,
@@ -118,6 +122,8 @@ class DatabaseService {
 
         quantity REAL NOT NULL DEFAULT 1,
         unit TEXT NOT NULL DEFAULT 'unidade',
+        package_size REAL,
+        package_count INTEGER,
 
         calories INTEGER,
 
@@ -194,6 +200,8 @@ class DatabaseService {
       ).millisecondsSinceEpoch,
       'quantity': 1.0,
       'unit': 'L',
+      'package_size': 1.0,
+      'package_count': 1,
     });
 
     await _seedShoppingList(db);
@@ -491,6 +499,26 @@ class DatabaseService {
     await _createBarcodeIndex(db);
   }
 
+  Future<void> _upgradeToVersion7(Database db) async {
+    final columns = await db.rawQuery('PRAGMA table_info($_productsTable)');
+
+    final columnNames = columns.map((column) => column['name']).toSet();
+
+    if (!columnNames.contains('package_size')) {
+      await db.execute(
+        'ALTER TABLE $_productsTable '
+        'ADD COLUMN package_size REAL',
+      );
+    }
+
+    if (!columnNames.contains('package_count')) {
+      await db.execute(
+        'ALTER TABLE $_productsTable '
+        'ADD COLUMN package_count INTEGER',
+      );
+    }
+  }
+
   String _ownerWhere(int? userId) {
     if (userId == null) {
       return 'user_id IS NULL';
@@ -523,6 +551,31 @@ class DatabaseService {
         'quantity',
         'A quantidade deve ser maior '
             'que zero.',
+      );
+    }
+
+    final packageSize = product.packageSize;
+    final packageCount = product.packageCount;
+
+    if ((packageSize == null) != (packageCount == null)) {
+      throw ArgumentError(
+        'A capacidade e a quantidade de embalagens devem ser informadas juntas.',
+      );
+    }
+
+    if (packageSize != null && (!packageSize.isFinite || packageSize <= 0)) {
+      throw ArgumentError.value(
+        packageSize,
+        'packageSize',
+        'A capacidade da embalagem deve ser maior que zero.',
+      );
+    }
+
+    if (packageCount != null && packageCount <= 0) {
+      throw ArgumentError.value(
+        packageCount,
+        'packageCount',
+        'A quantidade de embalagens deve ser maior que zero.',
       );
     }
   }
@@ -870,6 +923,7 @@ class DatabaseService {
   Future<Product> updateQuantity({
     required Product product,
     required double amountToAdd,
+    int packagesToAdd = 0,
   }) async {
     final id = product.id;
 
@@ -889,15 +943,33 @@ class DatabaseService {
       );
     }
 
+    if (packagesToAdd < 0) {
+      throw ArgumentError.value(
+        packagesToAdd,
+        'packagesToAdd',
+        'A quantidade de embalagens não pode ser negativa.',
+      );
+    }
+
     final db = await database;
 
     return db.transaction((transaction) async {
-      final updatedRows = await transaction.rawUpdate(
-        'UPDATE $_productsTable '
-        'SET quantity = quantity + ? '
-        'WHERE id = ?',
-        [amountToAdd, id],
-      );
+      final tracksPackages = product.hasPackageInfo && packagesToAdd > 0;
+
+      final updatedRows = tracksPackages
+          ? await transaction.rawUpdate(
+              'UPDATE $_productsTable '
+              'SET quantity = quantity + ?, '
+              'package_count = package_count + ? '
+              'WHERE id = ?',
+              [amountToAdd, packagesToAdd, id],
+            )
+          : await transaction.rawUpdate(
+              'UPDATE $_productsTable '
+              'SET quantity = quantity + ? '
+              'WHERE id = ?',
+              [amountToAdd, id],
+            );
 
       if (updatedRows != 1) {
         throw StateError(

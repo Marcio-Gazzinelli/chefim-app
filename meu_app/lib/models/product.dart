@@ -8,6 +8,8 @@ class Product {
     this.userId,
     this.quantity = 1,
     this.unit = 'unidade',
+    this.packageSize,
+    this.packageCount,
     this.calories,
     this.barcode,
     this.brand,
@@ -35,6 +37,40 @@ class Product {
 
   final double quantity;
   final String unit;
+
+  /// Capacidade de uma embalagem na unidade indicada por [unit].
+  ///
+  /// Exemplo: para três embalagens de 150 g, o valor é 150.
+  final double? packageSize;
+
+  /// Quantidade de embalagens que compõem o estoque atual.
+  ///
+  /// Exemplo: para três embalagens de 150 g, o valor é 3.
+  final int? packageCount;
+
+  bool get hasPackageInfo {
+    final size = packageSize;
+    final count = packageCount;
+
+    return size != null &&
+        size.isFinite &&
+        size > 0 &&
+        count != null &&
+        count > 0;
+  }
+
+  String? get packageLabel {
+    if (!hasPackageInfo) {
+      return null;
+    }
+
+    final count = packageCount!;
+    final size = packageSize!;
+    final packageWord = count == 1 ? 'embalagem' : 'embalagens';
+
+    return '$count $packageWord de '
+        '${_formatAmount(size)} ${_displayUnit(unit, size)}';
+  }
 
   /// Campo legado mantido para não perder dados de versões anteriores.
   final int? calories;
@@ -194,6 +230,10 @@ class Product {
     bool clearExpiryDate = false,
     double? quantity,
     String? unit,
+    double? packageSize,
+    bool clearPackageSize = false,
+    int? packageCount,
+    bool clearPackageCount = false,
     int? calories,
     String? barcode,
     String? brand,
@@ -219,6 +259,10 @@ class Product {
       userId: userId ?? this.userId,
       quantity: quantity ?? this.quantity,
       unit: unit ?? this.unit,
+      packageSize: clearPackageSize ? null : packageSize ?? this.packageSize,
+      packageCount: clearPackageCount
+          ? null
+          : packageCount ?? this.packageCount,
       calories: calories ?? this.calories,
       barcode: barcode ?? this.barcode,
       brand: brand ?? this.brand,
@@ -250,6 +294,8 @@ class Product {
           : DateUtils.dateOnly(expiry).millisecondsSinceEpoch,
       'quantity': quantity,
       'unit': unit,
+      'package_size': packageSize,
+      'package_count': packageCount,
       'calories': calories,
       'barcode': barcode,
       'brand': brand,
@@ -284,6 +330,8 @@ class Product {
       userId: userIdValue == null ? null : (userIdValue as num).toInt(),
       quantity: (map['quantity'] as num?)?.toDouble() ?? 1,
       unit: _readNullableString(map['unit']) ?? 'unidade',
+      packageSize: (map['package_size'] as num?)?.toDouble(),
+      packageCount: (map['package_count'] as num?)?.toInt(),
       calories: caloriesValue == null ? null : (caloriesValue as num).toInt(),
       barcode: _readNullableString(map['barcode']),
       brand: _readNullableString(map['brand']),
@@ -382,6 +430,95 @@ String? _readNullableString(Object? value) {
 
 String _readRequiredString(Object? value, {required String fallback}) {
   return _readNullableString(value) ?? fallback;
+}
+
+typedef _PackageMeasure = ({double size, String unit});
+
+/// Interpreta capacidades comuns recebidas dos catálogos.
+///
+/// Exemplos aceitos: 150 g, 1 L, 350 ml e 6 x 330 ml.
+_PackageMeasure? _parsePackageMeasure(String? value) {
+  final text = value?.trim();
+
+  if (text == null || text.isEmpty) {
+    return null;
+  }
+
+  const unitPattern =
+      r'(kg|quilogramas?|quilos?|g|gramas?|ml|mililitros?|l|litros?|unidades?)';
+
+  final multipack = RegExp(
+    r'(\d+)\s*[x×]\s*(\d+(?:[.,]\d+)?)\s*' + unitPattern,
+    caseSensitive: false,
+  ).firstMatch(text);
+
+  if (multipack != null) {
+    final count = int.tryParse(multipack.group(1)!);
+    final individualSize = _parseAmount(multipack.group(2));
+    final unit = _normalizeMeasureUnit(multipack.group(3));
+
+    if (count != null && count > 0 && individualSize != null && unit != null) {
+      return (size: count * individualSize, unit: unit);
+    }
+  }
+
+  final simple = RegExp(
+    r'(\d+(?:[.,]\d+)?)\s*' + unitPattern,
+    caseSensitive: false,
+  ).firstMatch(text);
+
+  if (simple == null) {
+    return null;
+  }
+
+  final size = _parseAmount(simple.group(1));
+  final unit = _normalizeMeasureUnit(simple.group(2));
+
+  if (size == null || unit == null) {
+    return null;
+  }
+
+  return (size: size, unit: unit);
+}
+
+double? _parseAmount(String? value) {
+  final parsed = double.tryParse(value?.replaceAll(',', '.') ?? '');
+
+  if (parsed == null || !parsed.isFinite || parsed <= 0) {
+    return null;
+  }
+
+  return parsed;
+}
+
+String? _normalizeMeasureUnit(String? value) {
+  final unit = value?.trim().toLowerCase();
+
+  if (unit == null || unit.isEmpty) {
+    return null;
+  }
+
+  if (unit == 'kg' || unit.startsWith('quilo')) {
+    return 'kg';
+  }
+
+  if (unit == 'g' || unit.startsWith('grama')) {
+    return 'g';
+  }
+
+  if (unit == 'ml' || unit.startsWith('mililitro')) {
+    return 'mL';
+  }
+
+  if (unit == 'l' || unit.startsWith('litro')) {
+    return 'L';
+  }
+
+  if (unit.startsWith('unidade')) {
+    return 'unidade';
+  }
+
+  return null;
 }
 
 String _formatAmount(double value) {

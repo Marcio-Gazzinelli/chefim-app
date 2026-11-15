@@ -2,8 +2,8 @@ part of '../main.dart';
 
 /// Dados de um produto recuperados de um catálogo externo ou comunitário.
 ///
-/// Os campos são opcionais porque tanto o Open Food Facts quanto o catálogo
-/// do Chefim podem possuir registros incompletos.
+/// Os campos são opcionais porque os catálogos podem possuir registros
+/// incompletos.
 class CatalogProduct {
   const CatalogProduct({
     required this.barcode,

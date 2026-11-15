@@ -17,7 +17,10 @@ extension _PantryScreen on _ChefimShellState {
 
     final hasAlert = expired > 0 || expiring > 0;
 
-    final visibleProducts = products.where(_matchesPantryFilter).toList();
+    final visibleProducts = products
+        .where(_matchesPantryFilter)
+        .where(_matchesPantrySearch)
+        .toList();
 
     final warningPeriod = expiryWarningDays == 1
         ? 'no próximo dia'
@@ -83,6 +86,8 @@ extension _PantryScreen on _ChefimShellState {
           label: const Text('Adicionar manualmente'),
         ),
       ),
+      const SizedBox(height: 12),
+      _pantrySearchField(),
       const SizedBox(height: 12),
       Wrap(
         spacing: 8,
@@ -180,6 +185,77 @@ extension _PantryScreen on _ChefimShellState {
     }
   }
 
+  bool _matchesPantrySearch(Product product) {
+    final query = _normalizePantrySearch(pantrySearchQuery);
+
+    if (query.isEmpty) {
+      return true;
+    }
+
+    final searchableText = _normalizePantrySearch(
+      [
+        product.name,
+        product.brand,
+        product.barcode,
+      ].whereType<String>().join(' '),
+    );
+
+    return searchableText.contains(query);
+  }
+
+  String _normalizePantrySearch(String value) {
+    return value
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[áàâãä]'), 'a')
+        .replaceAll(RegExp(r'[éèêë]'), 'e')
+        .replaceAll(RegExp(r'[íìîï]'), 'i')
+        .replaceAll(RegExp(r'[óòôõö]'), 'o')
+        .replaceAll(RegExp(r'[úùûü]'), 'u')
+        .replaceAll('ç', 'c');
+  }
+
+  Widget _pantrySearchField() {
+    final hasSearch = pantrySearchQuery.trim().isNotEmpty;
+
+    return TextField(
+      controller: pantrySearchController,
+      onChanged: setPantrySearch,
+      textInputAction: TextInputAction.search,
+      decoration: InputDecoration(
+        hintText: 'Pesquisar na despensa',
+        hintStyle: type(11, color: muted),
+        prefixIcon: Icon(Icons.search, color: muted, size: 21),
+        suffixIcon: hasSearch
+            ? IconButton(
+                tooltip: 'Limpar pesquisa',
+                onPressed: clearPantrySearch,
+                icon: Icon(Icons.close, color: muted, size: 20),
+              )
+            : null,
+        filled: true,
+        fillColor: surface,
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 13,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: line),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: line),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: green, width: 1.4),
+        ),
+      ),
+    );
+  }
+
   String _pantrySectionTitle() {
     switch (pantryFilter) {
       case PantryFilter.all:
@@ -216,6 +292,35 @@ extension _PantryScreen on _ChefimShellState {
   }
 
   Widget _emptyFilteredPantry() {
+    final hasSearch = pantrySearchQuery.trim().isNotEmpty;
+
+    if (hasSearch) {
+      return panel(
+        Column(
+          children: [
+            Icon(Icons.search_off_outlined, color: muted, size: 38),
+            const SizedBox(height: 10),
+            Text(
+              'Nenhum produto encontrado.',
+              textAlign: TextAlign.center,
+              style: type(13, bold: true),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Tente pesquisar por outro nome, marca ou código.',
+              textAlign: TextAlign.center,
+              style: type(11, color: muted),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: clearPantrySearch,
+              child: const Text('Limpar pesquisa'),
+            ),
+          ],
+        ),
+      );
+    }
+
     final showingExpired = pantryFilter == PantryFilter.expired;
 
     return panel(
@@ -280,8 +385,13 @@ extension _PantryScreen on _ChefimShellState {
                 const SizedBox(height: 3),
                 Text(_expiryText(product), style: type(11, color: statusColor)),
                 Text(
-                  '${product.quantityLabel} • ${product.date}',
+                  product.hasPackageInfo
+                      ? '${product.packageLabel} • Total: '
+                            '${product.quantityLabel}'
+                      : '${product.quantityLabel} • ${product.date}',
                   style: type(10, color: muted),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
@@ -392,7 +502,15 @@ extension _PantryScreen on _ChefimShellState {
                 ),
                 const SizedBox(height: 18),
               ],
-              _productDetail('Quantidade', product.quantityLabel),
+              if (product.hasPackageInfo) ...[
+                _productDetail('Embalagens', '${product.packageCount}'),
+                _productDetail(
+                  'Capacidade por embalagem',
+                  '${_formatAmount(product.packageSize!)} '
+                      '${_displayUnit(product.unit, product.packageSize!)}',
+                ),
+              ],
+              _productDetail('Quantidade total', product.quantityLabel),
               _productDetail('Validade', product.date),
               if (product.brand?.trim().isNotEmpty == true)
                 _productDetail('Marca', product.brand!.trim()),
@@ -722,7 +840,8 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
   ];
 
   late final TextEditingController _nameController;
-  late final TextEditingController _quantityController;
+  late final TextEditingController _capacityController;
+  late final TextEditingController _packageCountController;
   late String _unit;
 
   final ImagePicker _imagePicker = ImagePicker();
@@ -754,11 +873,40 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
 
     _nameController = TextEditingController(text: product?.name ?? '');
 
-    _quantityController = TextEditingController(
-      text: _formatAmount(product?.quantity ?? 1),
+    _unit = product?.unit ?? 'unidade';
+
+    late final double initialCapacity;
+    late final int initialPackageCount;
+
+    if (product?.hasPackageInfo == true) {
+      final savedProduct = product!;
+
+      initialCapacity = savedProduct.packageSize!;
+      initialPackageCount = savedProduct.packageCount!;
+    } else if (product != null &&
+        product.unit == 'unidade' &&
+        product.quantity == product.quantity.roundToDouble()) {
+      initialCapacity = 1;
+      initialPackageCount = product.quantity.toInt();
+    } else if (product != null) {
+      initialCapacity = product.quantity;
+      initialPackageCount = 1;
+    } else {
+      initialCapacity = 1;
+      initialPackageCount = 1;
+    }
+
+    _capacityController = TextEditingController(
+      text: _formatAmount(initialCapacity),
     );
 
-    _unit = product?.unit ?? 'unidade';
+    _packageCountController = TextEditingController(
+      text: '$initialPackageCount',
+    );
+
+    _capacityController.addListener(_refreshCalculatedTotal);
+    _packageCountController.addListener(_refreshCalculatedTotal);
+
     _expiryDate = product?.expiryDate;
     _imageLocation = product?.imageLocation;
   }
@@ -766,8 +914,40 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
   @override
   void dispose() {
     _nameController.dispose();
-    _quantityController.dispose();
+    _capacityController.dispose();
+    _packageCountController.dispose();
     super.dispose();
+  }
+
+  void _refreshCalculatedTotal() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  double? get _capacity {
+    return _parseAmount(_capacityController.text.trim());
+  }
+
+  int? get _packageCount {
+    final value = int.tryParse(_packageCountController.text.trim());
+
+    if (value == null || value <= 0) {
+      return null;
+    }
+
+    return value;
+  }
+
+  double? get _calculatedTotal {
+    final capacity = _capacity;
+    final count = _packageCount;
+
+    if (capacity == null || count == null) {
+      return null;
+    }
+
+    return capacity * count;
   }
 
   bool _isRemoteImage(String location) {
@@ -978,15 +1158,20 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
     }
 
     final name = _nameController.text.trim();
+    final capacity = _capacity;
+    final packageCount = _packageCount;
+    final quantity = _calculatedTotal;
 
-    final quantity = double.tryParse(
-      _quantityController.text.trim().replaceAll(',', '.'),
-    );
-
-    if (name.isEmpty || quantity == null || quantity <= 0) {
+    if (name.isEmpty ||
+        capacity == null ||
+        packageCount == null ||
+        quantity == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Informe o nome e uma quantidade válida.'),
+          content: Text(
+            'Informe o nome, a capacidade e uma quantidade '
+            'de embalagens válida.',
+          ),
         ),
       );
       return;
@@ -1012,6 +1197,8 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
           userId: widget.product?.userId,
           quantity: quantity,
           unit: _unit,
+          packageSize: capacity,
+          packageCount: packageCount,
           calories: widget.product?.calories,
           barcode: widget.product?.barcode,
           brand: widget.product?.brand,
@@ -1140,9 +1327,9 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
               children: [
                 Expanded(
                   child: field(
-                    'Quantidade',
-                    'Ex.: 1',
-                    _quantityController,
+                    'Capacidade por embalagem',
+                    'Ex.: 500',
+                    _capacityController,
                     keyboard: const TextInputType.numberWithOptions(
                       decimal: true,
                     ),
@@ -1180,6 +1367,45 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 14),
+            field(
+              'Quantidade de embalagens',
+              'Ex.: 2',
+              _packageCountController,
+              keyboard: TextInputType.number,
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                color: softGreen,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: line),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.calculate_outlined, color: darkGreen),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Quantidade total', style: type(10, color: muted)),
+                        const SizedBox(height: 2),
+                        Text(
+                          _calculatedTotal == null
+                              ? 'Preencha a capacidade e as embalagens'
+                              : '${_formatAmount(_calculatedTotal!)} '
+                                    '${_displayUnit(_unit, _calculatedTotal!)}',
+                          style: type(13, bold: true, color: darkGreen),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 14),
             Text('Data de vencimento (opcional)', style: type(12, bold: true)),

@@ -281,10 +281,7 @@ class _ChefimShellState extends State<ChefimShell> {
   @override
   Widget build(BuildContext context) {
     if (sessionLoading) {
-      return Scaffold(
-        backgroundColor: canvas,
-        body: Center(child: CircularProgressIndicator(color: green)),
-      );
+      return const _ChefimSplashFinished();
     }
 
     final pages = [home(), pantry(), recipes(), profile()];

@@ -181,3 +181,80 @@ class _SplashScreenState extends State<SplashScreen>
     );
   }
 }
+
+class _ChefimSplashFinished extends StatelessWidget {
+  const _ChefimSplashFinished();
+
+  @override
+  Widget build(BuildContext context) {
+    const splashGreen = Color(0xFF3DAA37);
+
+    return Scaffold(
+      backgroundColor: splashGreen,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Center(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final logoWidth = constraints.maxWidth > 330
+                    ? 330.0
+                    : constraints.maxWidth;
+
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: logoWidth,
+                      height: 100,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        alignment: Alignment.center,
+                        children: [
+                          Transform.translate(
+                            offset: Offset(-logoWidth * 0.28, 0),
+                            child: const Icon(
+                              Icons.soup_kitchen_rounded,
+                              color: Colors.white,
+                              size: 72,
+                            ),
+                          ),
+                          Positioned(
+                            left: logoWidth * 0.34,
+                            top: 17,
+                            child: const Text(
+                              'Chefim',
+                              maxLines: 1,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 48,
+                                height: 1.2,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -1.5,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Seu Companheiro na Cozinha',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

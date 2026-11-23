@@ -130,3 +130,16 @@ app.*.symbols
 
 # Configuração local do Supabase
 **/supabase.json
+
+# Cloudflare Wrangler
+chefim-api/.wrangler/
+
+# Dependências Node.js
+chefim-api/node_modules/
+
+# Variáveis e segredos locais da API
+chefim-api/.dev.vars
+chefim-api/.dev.vars.*
+chefim-api/.env
+chefim-api/.env.*
+!chefim-api/.env.example

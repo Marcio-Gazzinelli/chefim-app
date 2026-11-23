@@ -11,6 +11,8 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 part 'core/app_theme.dart';
 
@@ -37,6 +39,7 @@ part 'screens/settings_screen.dart';
 part 'screens/shopping_list_screen.dart';
 part 'screens/splash_screen.dart';
 part 'screens/terms_screen.dart';
+part 'screens/themealdb_results_screen.dart';
 
 part 'services/barcode_parser_service.dart';
 part 'services/cosmos_catalog_service.dart';
@@ -47,6 +50,10 @@ part 'services/preferences_service.dart';
 part 'services/product_catalog_service.dart';
 part 'services/recipe_suggestion_service.dart';
 part 'services/supabase_catalog_service.dart';
+part 'services/themealdb_service.dart';
+part 'services/themealdb_ranking_service.dart';
+part 'services/ingredient_normalizer_service.dart';
+part 'services/ai_recipe_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

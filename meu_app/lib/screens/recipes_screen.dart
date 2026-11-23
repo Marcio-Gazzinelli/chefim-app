@@ -24,7 +24,7 @@ extension _RecipesScreen on _ChefimShellState {
               borderRadius: BorderRadius.circular(20),
             ),
             child: Text(
-              '0 disponíveis',
+              'Busca experimental',
               style: type(10, bold: true, color: darkGreen),
             ),
           ),
@@ -36,7 +36,28 @@ extension _RecipesScreen on _ChefimShellState {
           children: [
             badge(Icons.soup_kitchen_outlined, softGreen, darkGreen, size: 62),
             const SizedBox(height: 14),
-            Text('Nenhuma receita disponível', style: type(15, bold: true)),
+            Text(
+              'Descubra receitas com sua despensa',
+              style: type(15, bold: true),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Selecione seus ingredientes e encontre '
+              'referências culinárias.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 18),
+            FilledButton.icon(
+              onPressed: productsLoading
+                  ? null
+                  : () => open(
+                      TheMealDbResultsPage(
+                        products: List<Product>.of(products),
+                      ),
+                    ),
+              icon: const Icon(Icons.restaurant_menu),
+              label: const Text('Buscar com minha despensa'),
+            ),
           ],
         ),
       ),

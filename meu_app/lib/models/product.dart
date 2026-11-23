@@ -116,9 +116,10 @@ class Product {
       return null;
     }
 
-    return DateUtils.dateOnly(value)
-        .difference(DateUtils.dateOnly(DateTime.now()))
-        .inDays;
+    final today = DateTime.now();
+    final expiryDay = DateTime.utc(value.year, value.month, value.day);
+    final currentDay = DateTime.utc(today.year, today.month, today.day);
+    return expiryDay.difference(currentDay).inDays;
   }
 
   /// Data de validade formatada.

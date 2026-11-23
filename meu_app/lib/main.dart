@@ -39,7 +39,8 @@ part 'screens/settings_screen.dart';
 part 'screens/shopping_list_screen.dart';
 part 'screens/splash_screen.dart';
 part 'screens/terms_screen.dart';
-part 'screens/themealdb_results_screen.dart';
+part 'screens/recipe_loading_screen.dart';
+part 'screens/recipe_result_screen.dart';
 
 part 'services/barcode_parser_service.dart';
 part 'services/cosmos_catalog_service.dart';

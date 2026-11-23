@@ -6,14 +6,19 @@ class PreferencesService {
   static final PreferencesService instance = PreferencesService._();
 
   static const String _nightModeKey = 'night_mode';
+
   static const String _dataSaverKey = 'data_saver';
-  static const String _automaticSyncKey = 'automatic_sync';
+
   static const String _personalizedSuggestionsKey = 'personalized_suggestions';
 
   static const String _expiryNotificationsKey = 'expiry_notifications';
+
   static const String _recipeNotificationsKey = 'recipe_notifications';
+
   static const String _shoppingNotificationsKey = 'shopping_notifications';
+
   static const String _expiryWarningDaysKey = 'expiry_warning_days';
+
   static const String _currentUserIdKey = 'current_user_id';
 
   final SharedPreferencesAsync _preferences = SharedPreferencesAsync();
@@ -27,19 +32,11 @@ class PreferencesService {
   }
 
   Future<bool> getDataSaver() async {
-    return await _preferences.getBool(_dataSaverKey) ?? true;
+    return await _preferences.getBool(_dataSaverKey) ?? false;
   }
 
   Future<void> setDataSaver(bool enabled) async {
     await _preferences.setBool(_dataSaverKey, enabled);
-  }
-
-  Future<bool> getAutomaticSync() async {
-    return await _preferences.getBool(_automaticSyncKey) ?? true;
-  }
-
-  Future<void> setAutomaticSync(bool enabled) async {
-    await _preferences.setBool(_automaticSyncKey, enabled);
   }
 
   Future<bool> getPersonalizedSuggestions() async {
@@ -83,7 +80,7 @@ class PreferencesService {
   }
 
   Future<int?> getCurrentUserId() async {
-    return _preferences.getInt(_currentUserIdKey);
+    return await _preferences.getInt(_currentUserIdKey);
   }
 
   Future<void> setCurrentUserId(int userId) async {

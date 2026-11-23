@@ -50,7 +50,7 @@ extension _AboutScreen on _ChefimShellState {
               children: [
                 Text('Projeto acadêmico', style: type(13, bold: true)),
                 Text(
-                  'Sprint 3 — Engenharia de Computação',
+                  'Sprint 4 — Engenharia de Computação',
                   style: type(11, color: muted),
                 ),
                 Text('Versão 1.0 • 2026', style: type(10, color: muted)),

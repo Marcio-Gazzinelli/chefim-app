@@ -63,7 +63,7 @@ class AiRecipeService {
   // Configurável na execução do Flutter.
   static const String _baseUrl = String.fromEnvironment(
     'CHEFIM_API_URL',
-    defaultValue: 'http://127.0.0.1:8787',
+    defaultValue: '',
   );
 
   Future<AiGeneratedRecipe> adaptRecipe({
@@ -108,12 +108,48 @@ class AiRecipeService {
       },
     };
 
-    final uri = Uri.parse('$_baseUrl/recipes/adapt');
+    // Para builds de distribuição, passe CHEFIM_API_URL via --dart-define.
+    // Não existe dependência obrigatória de localhost, USB ou Wrangler.
+    final apiUri = Uri.tryParse(_baseUrl);
+    if (apiUri == null ||
+        apiUri.scheme != 'https' ||
+        apiUri.host.isEmpty ||
+        apiUri.userInfo.isNotEmpty) {
+      throw StateError('API do Chefim não configurada (HTTPS).');
+    }
+
+    final supabase = Supabase.instance.client;
+
+    var session = supabase.auth.currentSession;
+
+    // Cria uma identidade anônima somente quando necessário.
+    if (session == null) {
+      try {
+        final response = await supabase.auth.signInAnonymously();
+        session = response.session;
+      } catch (error) {
+        debugPrint('Chefim: erro na autenticação anônima: $error');
+
+        throw StateError(
+          'Não foi possível conectar ao serviço de receitas. '
+          'Tente novamente.',
+        );
+      }
+    }
+
+    if (session == null) {
+      throw StateError('Não foi possível iniciar a sessão de receitas.');
+    }
+
+    final uri = apiUri.resolve('/recipes/adapt');
 
     final response = await http
         .post(
           uri,
-          headers: {'Content-Type': 'application/json; charset=utf-8'},
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Authorization': 'Bearer ${session.accessToken}',
+          },
           body: jsonEncode(payload),
         )
         .timeout(const Duration(seconds: 90));
@@ -121,7 +157,12 @@ class AiRecipeService {
     final decoded = jsonDecode(utf8.decode(response.bodyBytes));
 
     if (response.statusCode != 200) {
-      throw StateError('Falha ao gerar receita. HTTP ${response.statusCode}');
+      final message = decoded is Map ? decoded['error'] : null;
+      throw StateError(
+        message is String && message.isNotEmpty
+            ? message
+            : 'Falha ao gerar receita. HTTP ${response.statusCode}',
+      );
     }
 
     if (decoded is! Map || decoded['receita'] is! Map) {

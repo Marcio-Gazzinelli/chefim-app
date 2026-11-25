@@ -56,8 +56,14 @@ part 'services/themealdb_ranking_service.dart';
 part 'services/ingredient_normalizer_service.dart';
 part 'services/ai_recipe_service.dart';
 
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  await Supabase.initialize(
+    url: const String.fromEnvironment('SUPABASE_URL'),
+    anonKey: const String.fromEnvironment('SUPABASE_ANON_KEY'),
+  );
 
   _configureOpenFoodFacts();
 

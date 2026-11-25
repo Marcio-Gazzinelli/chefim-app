@@ -10,6 +10,58 @@ function json(data, status = 200) {
     });
 }
 
+// Valida a sessão Supabase junto ao servidor Auth (não confia em JWT decodificado).
+async function authenticate(request, env) {
+    if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) {
+        return { error: json({ error: "Autenticação não configurada no servidor." }, 503) };
+    }
+
+    const match = /^Bearer\s+(.+)$/i.exec(request.headers.get("authorization") ?? "");
+    const token = match?.[1]?.trim();
+    if (!token || token.length > 8192) {
+        return { error: json({ error: "Entre na sua conta para gerar receitas." }, 401) };
+    }
+
+    let authUrl;
+    try {
+        const base = new URL(env.SUPABASE_URL);
+        if (base.protocol !== "https:" || base.username || base.password ||
+            base.search || base.hash) throw new Error("URL inválida");
+        authUrl = new URL("/auth/v1/user", base.origin);
+    } catch (_) {
+        return { error: json({ error: "Configuração de autenticação inválida." }, 503) };
+    }
+
+    let response;
+    try {
+        response = await fetch(authUrl, {
+            headers: {
+                apikey: env.SUPABASE_PUBLISHABLE_KEY,
+                Authorization: `Bearer ${token}`,
+            },
+            signal: AbortSignal.timeout(10000),
+        });
+    } catch (_) {
+        return { error: json({ error: "Serviço de autenticação indisponível." }, 503) };
+    }
+
+    if (response.status === 401 || response.status === 403) {
+        return { error: json({ error: "Sessão inválida ou expirada. Entre novamente." }, 401) };
+    }
+    if (!response.ok) {
+        return { error: json({ error: "Não foi possível validar sua sessão." }, 503) };
+    }
+
+    let user;
+    try { user = await response.json(); } catch (_) {
+        return { error: json({ error: "Resposta de autenticação inválida." }, 503) };
+    }
+    if (!validText(user?.id)) {
+        return { error: json({ error: "Usuário não autenticado." }, 401) };
+    }
+    return { userId: user.id };
+}
+
 function validText(value) {
     return typeof value === "string" &&
         value.trim().length > 0;
@@ -61,93 +113,118 @@ function extractText(result) {
 
 function parseRecipe(result) {
     const text = extractText(result).trim();
-
-    // Remove cercas Markdown, caso o modelo as produza.
     const cleaned = text
         .replace(/^```(?:json)?\s*/i, "")
         .replace(/\s*```$/, "");
 
-    const recipe = JSON.parse(cleaned);
-
-    console.log("===== VALIDAÇÃO DA RECEITA =====");
-
-    console.log("Nome:", recipe?.nome);
-    console.log("Porções:", recipe?.porcoes);
-
-    console.log(
-        "Ingredientes:",
-        Array.isArray(recipe?.ingredientes)
-            ? recipe.ingredientes.length
-            : "Formato inválido"
-    );
-
-    console.log(
-        "Etapas:",
-        Array.isArray(recipe?.preparo)
-            ? recipe.preparo.length
-            : "Formato inválido"
-    );
-
-    console.log(
-        "Estrutura dos ingredientes:",
-        Array.isArray(recipe?.ingredientes)
-            ? recipe.ingredientes.map((item) => ({
-                nome: item?.nome,
-                tipoQuantidade: typeof item?.quantidade,
-                unidade: item?.unidade,
-                origem: item?.origem,
-            }))
-            : []
-    );
-
-
-
-    console.log("Chefim: estrutura retornada pela IA", {
-        campos: Object.keys(recipe ?? {}),
-        nome: typeof recipe?.nome,
-        porcoes: recipe?.porcoes,
-        ingredientes: Array.isArray(recipe?.ingredientes)
-            ? recipe.ingredientes.length
-            : "inválido",
-        preparo: Array.isArray(recipe?.preparo)
-            ? recipe.preparo.length
-            : "inválido",
-    });
-
-    if (Array.isArray(recipe?.ingredientes)) {
-        console.log(
-            "Chefim: formatos dos ingredientes",
-            recipe.ingredientes.map((item) => ({
-                nome: typeof item?.nome,
-                quantidade: typeof item?.quantidade,
-                unidade: typeof item?.unidade,
-                origem: item?.origem,
-            }))
-        );
+    // Respostas válidas às vezes contêm texto antes/depois do objeto.
+    // Usamos somente o bloco JSON caso o texto completo não seja JSON.
+    let recipe;
+    try {
+        recipe = JSON.parse(cleaned);
+    } catch (_) {
+        const start = cleaned.indexOf("{");
+        const end = cleaned.lastIndexOf("}");
+        if (start < 0 || end <= start) {
+            throw new Error("JSON ausente ou incompleto.");
+        }
+        recipe = JSON.parse(cleaned.slice(start, end + 1));
     }
 
-    if (
-        !recipe ||
-        typeof recipe !== "object" ||
-        !validText(recipe.nome) ||
-        !Number.isInteger(recipe.porcoes) ||
-        recipe.porcoes < 1 ||
-        recipe.porcoes > 10 ||
-        !Array.isArray(recipe.ingredientes) ||
-        recipe.ingredientes.length === 0 ||
-        !Array.isArray(recipe.preparo) ||
-        recipe.preparo.length < 3 ||
-        recipe.preparo.some((step) => !validText(step)) ||
-        recipe.ingredientes.some(
-            (item) =>
-                !item ||
-                !validText(item.nome) ||
-                !validText(item.quantidade) ||
-                !validText(item.unidade)
-        )
-    ) {
-        throw new Error("Estrutura da receita inválida.");
+    if (!recipe || typeof recipe !== "object" || Array.isArray(recipe)) {
+        throw new Error("Resposta não é um objeto de receita.");
     }
+
+    // O modelo pode gerar quantidade como número; o Flutter espera String.
+    if (Array.isArray(recipe.ingredientes)) {
+        recipe.ingredientes = recipe.ingredientes.map((item) => {
+            if (!item || typeof item !== "object" || Array.isArray(item)) {
+                return item;
+            }
+            const normalized = { ...item };
+            if (typeof normalized.quantidade === "number" &&
+                Number.isFinite(normalized.quantidade) &&
+                normalized.quantidade > 0) {
+                normalized.quantidade = String(normalized.quantidade);
+            }
+            return normalized;
+        });
+    }
+
+    // Validacao explicita: facilita diagnosticar o campo que o modelo errou,
+    // sem registrar o conteudo da receita nem dados do usuario.
+    if (!validText(recipe.nome)) {
+        throw new Error("Campo nome ausente ou vazio.");
+    }
+    if (!Number.isInteger(recipe.porcoes) ||
+        recipe.porcoes < 1 || recipe.porcoes > 10) {
+        throw new Error("Campo porcoes invalido (esperado inteiro entre 1 e 10).");
+    }
+    if (!Array.isArray(recipe.ingredientes) ||
+        recipe.ingredientes.length === 0) {
+        throw new Error("Campo ingredientes ausente ou vazio.");
+    }
+    if (!Array.isArray(recipe.preparo) || recipe.preparo.length < 3) {
+        throw new Error("Campo preparo com menos de 3 etapas.");
+    }
+    for (const [index, step] of recipe.preparo.entries()) {
+        if (!validText(step)) {
+            throw new Error(`Etapa ${index + 1} do preparo invalida.`);
+        }
+    }
+    for (const [index, item] of recipe.ingredientes.entries()) {
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
+            throw new Error(`Ingrediente ${index + 1}: objeto invalido.`);
+        }
+        if (!validText(item.nome)) {
+            throw new Error(`Ingrediente ${index + 1}: nome invalido.`);
+        }
+        if (!validText(item.quantidade)) {
+            throw new Error(`Ingrediente ${index + 1}: quantidade invalida.`);
+        }
+
+
+        if (!validText(item.unidade)) {
+            const quantidade = String(item.quantidade ?? '')
+                .trim()
+                .toLowerCase();
+
+            const quantidadeSemMedida = [
+                'a gosto',
+                'à gosto',
+                'quanto baste',
+                'q.b.',
+                'qb',
+            ].includes(quantidade);
+
+            if (quantidadeSemMedida) {
+
+                item.unidade = '';
+            } else {
+                console.warn('Chefim: unidade inválida detectada', {
+                    ingredienteNumero: index + 1,
+                    nome: item.nome,
+                    quantidade: item.quantidade,
+                    unidade: item.unidade,
+                    tipoUnidade: typeof item.unidade,
+                });
+
+                throw new Error(
+                    `Ingrediente ${index + 1}: unidade invalida.`
+                );
+            }
+        }
+
+
+        if (!["selecionado", "adicional"].includes(item.origem)) {
+            throw new Error(`Ingrediente ${index + 1}: origem invalida.`);
+        }
+    }
+
+    // Observações são opcionais. Ignora entradas vazias.
+    recipe.observacoes = Array.isArray(recipe.observacoes)
+        ? recipe.observacoes.filter(validText)
+        : [];
 
     return recipe;
 }
@@ -169,29 +246,62 @@ export default {
             return json({ error: "Método não permitido." }, 405);
         }
 
-        // Esta primeira versão deve ser testada localmente.
-        // Antes de publicar, implementar autenticação,
-        // rate limit e proteção contra abuso.
-        if (url.hostname !== "localhost" &&
-            url.hostname !== "127.0.0.1") {
-            return json(
-                { error: "Endpoint indisponível nesta versão de testes." },
-                403
-            );
+        // Somente usuários autenticados podem consumir Workers AI.
+        const auth = await authenticate(request, env);
+        if (auth.error) return auth.error;
+
+        // Limitação aproximada: 5 receitas/minuto por usuário, por região Cloudflare.
+        // Se a configuração não existir, falha sem chamar o modelo.
+        if (!env.RECIPE_RATE_LIMITER) {
+            return json({ error: "Limite de requisições não configurado." }, 503);
+        }
+        try {
+            const { success } = await env.RECIPE_RATE_LIMITER.limit({
+                key: auth.userId,
+            });
+            if (!success) {
+                return json({ error: "Muitas receitas seguidas. Tente novamente em instantes." }, 429);
+            }
+        } catch (_) {
+            return json({ error: "Não foi possível validar o limite de uso." }, 503);
         }
 
-        const contentLength = Number(
-            request.headers.get("content-length") ?? 0
-        );
-
+        // Proteção contra corpos grandes, inclusive quando Content-Length está ausente.
+        const contentLength = Number(request.headers.get("content-length") ?? 0);
         if (contentLength > 20000) {
             return json({ error: "Requisição muito grande." }, 413);
         }
 
+        const reader = request.body?.getReader();
+        if (!reader) return json({ error: "Corpo da requisição ausente." }, 400);
+        const chunks = [];
+        let size = 0;
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                size += value.byteLength;
+                if (size > 20000) {
+                    await reader.cancel();
+                    return json({ error: "Requisição muito grande." }, 413);
+                }
+                chunks.push(value);
+            }
+        } catch (_) {
+            return json({ error: "Falha ao ler a requisição." }, 400);
+        }
+        const bytes = new Uint8Array(size);
+        let offset = 0;
+        for (const chunk of chunks) {
+            bytes.set(chunk, offset);
+            offset += chunk.byteLength;
+        }
+        const rawBody = new TextDecoder().decode(bytes);
+
         let body;
 
         try {
-            body = await request.json();
+            body = JSON.parse(rawBody);
         } catch (_) {
             return json({ error: "JSON inválido." }, 400);
         }
@@ -207,7 +317,13 @@ export default {
             !reference ||
             !validText(reference.nome) ||
             !Array.isArray(reference.ingredientes) ||
-            !Array.isArray(reference.preparo)
+            !Array.isArray(reference.preparo) ||
+            reference.nome.length > 200 ||
+            reference.ingredientes.length > 60 ||
+            reference.preparo.length > 60 ||
+            products.some((p) => p.nome.length > 200) ||
+            reference.ingredientes.some((name) => !validText(name) || name.length > 200) ||
+            reference.preparo.some((step) => !validText(step) || step.length > 1500)
         ) {
             return json({ error: "Dados inválidos." }, 400);
         }
@@ -338,50 +454,54 @@ Limite as observações às informações realmente necessárias.
                     referencia: reference,
                 }).length
             );
-            const result = await env.AI.run(MODEL, {
-                messages: [
-                    {
-                        role: "system",
-                        content: instructions,
-                    },
-                    {
-                        role: "user",
-                        content: JSON.stringify({
-                            produtos: products,
-                            referencia: reference,
-                        }),
-                    },
-                ],
-                temperature: 0.2,
-                max_tokens: 3500,
-                reasoning_effort: "low",
-            });
+            let recipe;
+            let lastValidationError = null;
+            for (let attempt = 1; attempt <= 2; attempt++) {
+                const result = await env.AI.run(MODEL, {
+                    messages: [
+                        {
+                            role: "system",
+                            content: lastValidationError
+                                ? `${instructions}\n\nATENCAO: na tentativa anterior, a resposta falhou na validacao: ${lastValidationError}. Corrija esse problema e siga rigorosamente a estrutura JSON.`
+                                : instructions,
+                        },
+                        {
+                            role: "user",
+                            content: JSON.stringify({
+                                produtos: products,
+                                referencia: reference,
+                            }),
+                        },
+                    ],
+                    temperature: 0.2,
+                    max_tokens: 3500,
+                    reasoning_effort: "low",
+                });
 
-            console.log(
-                "Chefim: IA respondeu em",
-                Date.now() - startTime,
-                "ms"
-            );
-
-            console.log(
-                "Motivo de término:",
-                result?.choices?.[0]?.finish_reason
-            );
-
-            console.log(
-                "Tamanho da resposta:",
-                result?.choices?.[0]?.message?.content?.length ?? 0
-            );
-
-            const finishReason = result?.choices?.[0]?.finish_reason;
-
-            if (finishReason === "length") {
-                throw new Error(
-                    "A IA atingiu o limite de tokens antes de concluir a receita."
-                );
+                const finishReason = result?.choices?.[0]?.finish_reason;
+                try {
+                    if (finishReason === "length") {
+                        throw new Error("Resposta truncada por limite de tokens.");
+                    }
+                    recipe = parseRecipe(result);
+                    console.log("Chefim: receita validada", {
+                        tentativa: attempt,
+                        duracaoMs: Date.now() - startTime,
+                    });
+                    break;
+                } catch (error) {
+                    // Não registre o texto completo da resposta: pode conter
+                    // nomes de produtos e informações do usuário.
+                    console.warn("Chefim: resposta de IA inválida", {
+                        tentativa: attempt,
+                        motivo: String(error?.message ?? error),
+                        finishReason: finishReason ?? "desconhecido",
+                        tamanhoResposta: result?.choices?.[0]?.message?.content?.length ?? 0,
+                    });
+                    lastValidationError = String(error?.message ?? error);
+                    if (attempt === 2) throw error;
+                }
             }
-
-            const recipe = parseRecipe(result);
 
             console.log(
                 "Chefim: receita validada em",

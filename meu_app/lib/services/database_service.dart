@@ -7,13 +7,15 @@ class DatabaseService {
 
   static const String _databaseName = 'chefim.db';
 
-  static const int _databaseVersion = 7;
+  static const int _databaseVersion = 8;
 
   static const String _usersTable = 'users';
 
   static const String _productsTable = 'products';
 
   static const String _shoppingTable = 'shopping_items';
+
+  static const String _savedRecipesTable = 'saved_recipes';
 
   Database? _database;
 
@@ -46,7 +48,9 @@ class DatabaseService {
         await _createUsersTable(db);
         await _createProductsTable(db);
         await _createShoppingTable(db);
+        await _createSavedRecipesTable(db);
         await _createOwnershipIndexes(db);
+        await _createSavedRecipesIndex(db);
         await _createBarcodeIndex(db);
         await _seedInitialData(db);
       },
@@ -84,6 +88,10 @@ class DatabaseService {
           await _upgradeToVersion7(db);
         }
 
+        if (oldVersion < 8) {
+          await _upgradeToVersion8(db);
+        }
+
         /*
          * A criação com IF NOT EXISTS garante
          * que os índices estejam presentes,
@@ -91,6 +99,7 @@ class DatabaseService {
          * da tabela.
          */
         await _createOwnershipIndexes(db);
+        await _createSavedRecipesIndex(db);
         await _createBarcodeIndex(db);
       },
     );
@@ -169,6 +178,22 @@ class DatabaseService {
     ''');
   }
 
+  Future<void> _createSavedRecipesTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $_savedRecipesTable (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+        user_id INTEGER
+          REFERENCES $_usersTable(id)
+          ON DELETE CASCADE,
+
+        name TEXT NOT NULL COLLATE NOCASE,
+        recipe_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      )
+    ''');
+  }
+
   Future<void> _createOwnershipIndexes(Database db) async {
     await db.execute(
       'CREATE INDEX IF NOT EXISTS '
@@ -180,6 +205,14 @@ class DatabaseService {
       'CREATE INDEX IF NOT EXISTS '
       'idx_shopping_user_id '
       'ON $_shoppingTable(user_id)',
+    );
+  }
+
+  Future<void> _createSavedRecipesIndex(Database db) async {
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS '
+      'idx_saved_recipes_owner_name '
+      'ON $_savedRecipesTable(user_id, name)',
     );
   }
 
@@ -519,6 +552,11 @@ class DatabaseService {
     }
   }
 
+  Future<void> _upgradeToVersion8(Database db) async {
+    await _createSavedRecipesTable(db);
+    await _createSavedRecipesIndex(db);
+  }
+
   String _ownerWhere(int? userId) {
     if (userId == null) {
       return 'user_id IS NULL';
@@ -667,6 +705,10 @@ class DatabaseService {
         await transaction.update(_shoppingTable, {
           'user_id': id,
         }, where: 'user_id IS NULL');
+
+        await transaction.update(_savedRecipesTable, {
+          'user_id': id,
+        }, where: 'user_id IS NULL');
       }
 
       return AppUser(
@@ -773,6 +815,12 @@ class DatabaseService {
 
       await transaction.delete(
         _shoppingTable,
+        where: 'user_id = ?',
+        whereArgs: [userId],
+      );
+
+      await transaction.delete(
+        _savedRecipesTable,
         where: 'user_id = ?',
         whereArgs: [userId],
       );
@@ -1085,6 +1133,52 @@ class DatabaseService {
       where: _ownerWhere(userId),
       whereArgs: _ownerWhereArgs(userId),
     );
+  }
+
+  Future<List<SavedRecipe>> getSavedRecipes({required int? userId}) async {
+    final db = await database;
+
+    final records = await db.query(
+      _savedRecipesTable,
+      where: _ownerWhere(userId),
+      whereArgs: _ownerWhereArgs(userId),
+      orderBy: 'created_at DESC, name COLLATE NOCASE ASC',
+    );
+
+    return records.map(SavedRecipe.fromMap).toList(growable: false);
+  }
+
+  Future<SavedRecipe> insertSavedRecipe({
+    required int? userId,
+    required AiGeneratedRecipe recipe,
+  }) async {
+    if (recipe.name.trim().isEmpty ||
+        recipe.ingredients.isEmpty ||
+        recipe.steps.isEmpty) {
+      throw ArgumentError('A receita precisa estar completa para ser salva.');
+    }
+
+    final db = await database;
+    final savedRecipe = SavedRecipe(
+      userId: userId,
+      recipe: recipe,
+      createdAt: DateTime.now(),
+    );
+    final values = savedRecipe.toMap()..remove('id');
+
+    final id = await db.insert(
+      _savedRecipesTable,
+      values,
+      conflictAlgorithm: ConflictAlgorithm.abort,
+    );
+
+    return savedRecipe.copyWith(id: id);
+  }
+
+  Future<int> deleteSavedRecipe(int id) async {
+    final db = await database;
+
+    return db.delete(_savedRecipesTable, where: 'id = ?', whereArgs: [id]);
   }
 
   Future<void> close() async {

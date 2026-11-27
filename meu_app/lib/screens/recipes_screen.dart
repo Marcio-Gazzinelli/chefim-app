@@ -4,10 +4,11 @@ extension _RecipesScreen on _ChefimShellState {
   Widget recipes() {
     return _RecipeIngredientsScreen(
       products: products,
+      userId: currentUserId,
       loading: productsLoading,
       error: productsError,
       onRetry: loadProducts,
-      onSearch: () => open(const ScaledRecipesPage()),
+      onSearch: () => open(ScaledRecipesPage(userId: currentUserId)),
     );
   }
 }
@@ -38,6 +39,7 @@ enum _RecipeExpiryGroup {
 class _RecipeIngredientsScreen extends StatefulWidget {
   const _RecipeIngredientsScreen({
     required this.products,
+    required this.userId,
     required this.loading,
     required this.error,
     required this.onRetry,
@@ -45,6 +47,7 @@ class _RecipeIngredientsScreen extends StatefulWidget {
   });
 
   final List<Product> products;
+  final int? userId;
   final bool loading;
   final String? error;
   final VoidCallback onRetry;
@@ -64,7 +67,8 @@ class _RecipeIngredientsScreenState extends State<_RecipeIngredientsScreen> {
   bool _hasStock(Product product) =>
       product.quantity.isFinite && product.quantity > 0;
 
-  bool _canSelect(Product product) => _hasStock(product) &&
+  bool _canSelect(Product product) =>
+      _hasStock(product) &&
       _RecipeExpiryGroup.fromDays(product.days) != _RecipeExpiryGroup.expired;
 
   @override
@@ -116,7 +120,11 @@ class _RecipeIngredientsScreenState extends State<_RecipeIngredientsScreen> {
 
     Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
-        builder: (_) => RecipeLoadingScreen(products: selected),
+        builder: (_) => RecipeLoadingScreen(
+          products: selected,
+          pantryProducts: widget.products,
+          userId: widget.userId,
+        ),
       ),
     );
   }
@@ -143,7 +151,8 @@ class _RecipeIngredientsScreenState extends State<_RecipeIngredientsScreen> {
 
     final count = widget.products
         .where(
-          (product) => _canSelect(product) &&
+          (product) =>
+              _canSelect(product) &&
               _selectedKeys.contains(_productKey(product)),
         )
         .length;
@@ -207,7 +216,8 @@ class _RecipeIngredientsScreenState extends State<_RecipeIngredientsScreen> {
                 for (final product in products)
                   CheckboxListTile(
                     controlAffinity: ListTileControlAffinity.leading,
-                    value: !expired &&
+                    value:
+                        !expired &&
                         _selectedKeys.contains(_productKey(product)),
                     onChanged: expired
                         ? null

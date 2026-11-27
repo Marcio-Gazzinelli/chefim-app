@@ -15,11 +15,20 @@ class AiRecipeIngredient {
 
   factory AiRecipeIngredient.fromJson(Map<String, dynamic> json) {
     return AiRecipeIngredient(
-      name: json['nome'] as String,
-      quantity: json['quantidade'] as String,
-      unit: json['unidade'] as String,
-      origin: json['origem'] as String,
+      name: (json['nome'] ?? '').toString(),
+      quantity: (json['quantidade'] ?? '').toString(),
+      unit: (json['unidade'] ?? '').toString(),
+      origin: (json['origem'] ?? 'adicional').toString(),
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'nome': name,
+      'quantidade': quantity,
+      'unidade': unit,
+      'origem': origin,
+    };
   }
 }
 
@@ -30,6 +39,8 @@ class AiGeneratedRecipe {
     required this.ingredients,
     required this.steps,
     required this.notes,
+    this.estimatedCaloriesTotal,
+    this.estimatedCaloriesPerServing,
   });
 
   final String name;
@@ -37,21 +48,65 @@ class AiGeneratedRecipe {
   final List<AiRecipeIngredient> ingredients;
   final List<String> steps;
   final List<String> notes;
+  final int? estimatedCaloriesTotal;
+  final int? estimatedCaloriesPerServing;
+
+  static int? _positiveInt(dynamic value) {
+    final number = value is num
+        ? value
+        : num.tryParse(value?.toString().replaceAll(',', '.') ?? '');
+
+    if (number == null || !number.isFinite || number <= 0) {
+      return null;
+    }
+
+    return number.round();
+  }
 
   factory AiGeneratedRecipe.fromJson(Map<String, dynamic> json) {
+    final servings = _positiveInt(json['porcoes']) ?? 0;
+    final totalCalories = _positiveInt(json['calorias_totais_estimadas']);
+    final caloriesPerServing =
+        _positiveInt(json['calorias_por_porcao']) ??
+        (totalCalories == null || servings <= 0
+            ? null
+            : (totalCalories / servings).round());
+
     return AiGeneratedRecipe(
-      name: json['nome'] as String,
-      servings: json['porcoes'] as int,
-      ingredients: (json['ingredientes'] as List)
+      name: (json['nome'] ?? '').toString(),
+      servings: servings,
+      ingredients: ((json['ingredientes'] as List?) ?? const [])
           .map(
             (item) => AiRecipeIngredient.fromJson(
               Map<String, dynamic>.from(item as Map),
             ),
           )
           .toList(),
-      steps: List<String>.from(json['preparo'] as List),
-      notes: List<String>.from((json['observacoes'] as List?) ?? []),
+      steps: ((json['preparo'] as List?) ?? const [])
+          .map((item) => item.toString())
+          .toList(),
+      notes: ((json['observacoes'] as List?) ?? const [])
+          .map((item) => item.toString())
+          .toList(),
+      estimatedCaloriesTotal: totalCalories,
+      estimatedCaloriesPerServing: caloriesPerServing,
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'nome': name,
+      'porcoes': servings,
+      'ingredientes': ingredients
+          .map((ingredient) => ingredient.toJson())
+          .toList(),
+      'preparo': steps,
+      'observacoes': notes,
+      if (estimatedCaloriesTotal != null)
+        'calorias_totais_estimadas': estimatedCaloriesTotal,
+      if (estimatedCaloriesPerServing != null)
+        'calorias_por_porcao': estimatedCaloriesPerServing,
+    };
   }
 }
 

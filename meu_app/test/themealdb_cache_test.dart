@@ -1,6 +1,8 @@
+// ignore_for_file: avoid_print
+
 import 'package:flutter_test/flutter_test.dart';
 
-import '../lib/main.dart' as chefim;
+import 'package:meu_app/main.dart' as chefim;
 
 void main() {
   test('Cache reutiliza os detalhes da mesma receita', () async {

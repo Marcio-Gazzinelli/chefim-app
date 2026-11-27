@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:http/http.dart' as http;
+
 import 'dart:convert';
 
 part 'core/app_theme.dart';
@@ -20,6 +21,7 @@ part 'models/app_user.dart';
 part 'models/catalog_product.dart';
 part 'models/product.dart';
 part 'models/recipe.dart';
+part 'models/saved_recipe.dart';
 
 part 'widgets/common_widgets.dart';
 
@@ -49,6 +51,7 @@ part 'services/label_ocr_service.dart';
 part 'services/password_service.dart';
 part 'services/preferences_service.dart';
 part 'services/product_catalog_service.dart';
+part 'services/recipe_ingredient_availability_service.dart';
 part 'services/recipe_suggestion_service.dart';
 part 'services/supabase_catalog_service.dart';
 part 'services/themealdb_service.dart';
@@ -56,13 +59,12 @@ part 'services/themealdb_ranking_service.dart';
 part 'services/ingredient_normalizer_service.dart';
 part 'services/ai_recipe_service.dart';
 
-
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Supabase.initialize(
     url: const String.fromEnvironment('SUPABASE_URL'),
-    anonKey: const String.fromEnvironment('SUPABASE_ANON_KEY'),
+    publishableKey: const String.fromEnvironment('SUPABASE_PUBLISHABLE_KEY'),
   );
 
   _configureOpenFoodFacts();
